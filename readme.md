@@ -37,3 +37,39 @@ export const aranet4KnownCharacteristicUUIDDescriptions = new Map([
     [ARANET_UNSED_GATT_UUID, "Aranet4 UNUSED GATT characteristic"],
     [ARANET_SENSOR_LOGS_UUID, "Aranet4 sensor logs"]
 ```
+
+Ref: https://github.com/kasparsd/sensor-pilot/blob/master/src/components/Devices/Aranet4.js
+
+```
+const aranetServices = {
+  sensor: {
+    serviceUuid: SENSOR_SERVICE_UUID,
+    resolvers: {
+      // Sensor values.
+      'f0cd3001-95da-4f4b-9ac8-aa55d312af0c': (value) => {
+        return {
+          co2: value.getUint16(0, true),
+          temperature: value.getUint16(2, true) / 20,
+          pressure: value.getUint16(4, true) / 10,
+          humidity: value.getUint8(6),
+          battery: value.getUint8(7),
+        }
+      },
+      // Seconds since the last sensor update.
+      'f0cd2004-95da-4f4b-9ac8-aa55d312af0c': (value) => Math.floor(Date.now() / 1000) - value.getUint16(0, true),
+      // Configured interval in seconds between the updates.
+      'f0cd2002-95da-4f4b-9ac8-aa55d312af0c': (value) => value.getUint16(0, true),
+    },
+  },
+  device: {
+    serviceUuid: 'device_information',
+    resolvers: {
+      manufacturer_name_string: (value) => decoder.decode(value),
+      model_number_string: (value) => decoder.decode(value),
+      serial_number_string: (value) => decoder.decode(value),
+      hardware_revision_string: (value) => decoder.decode(value),
+      software_revision_string: (value) => decoder.decode(value),
+    },
+  },
+}
+```

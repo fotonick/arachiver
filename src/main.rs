@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fmt;
 use std::time::Duration;
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
@@ -29,6 +30,13 @@ impl From<&[u8]> for CO2Measurement {
     }
 }
 
+impl fmt::Display for CO2Measurement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CO₂: {} ppm\nT: {}°C\nP: {} mbar\nHumidity: {}%\nBattery: {}%\n",
+            self.co2, self.temperature, self.pressure, self.humidity, self.battery)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let manager = Manager::new().await.unwrap();
@@ -45,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // find the device we're interested in
     let sensor = find_sensor(&central).await.unwrap();
-    central.stop_scan();
+    central.stop_scan().await.unwrap();
 
     // connect to the device
     sensor.connect().await?;
@@ -62,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let sleep_future = time::sleep(Duration::from_secs(300));
         let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
         let co2_measurement: CO2Measurement = From::from(&raw_c02_measurement[..]);
-        dbg!(co2_measurement);
+        println!("Current sensor reading: {}", co2_measurement);
         sleep_future.await;
     }
 }
