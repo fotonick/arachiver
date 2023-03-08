@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
-use tokio::time;
 use uuid::{Uuid, uuid};
 
 const ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID: Uuid = uuid!("f0cd1503-95da-4f4b-9ac8-aa55d312af0c");
@@ -70,13 +69,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let co2_char = chars.iter().find(|c| c.uuid == ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID).unwrap();
 
     // dance party
-    loop {
-        let sleep_future = time::sleep(Duration::from_secs(300));
-        let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
-        let co2_measurement: CO2Measurement = From::from(&raw_c02_measurement[..]);
-        println!("{}", co2_measurement);
-        sleep_future.await;
-    }
+    let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
+    let co2_measurement: CO2Measurement = From::from(&raw_c02_measurement[..]);
+    println!("{}", co2_measurement);
+    Ok(())
 }
 
 async fn find_sensor(central: &Adapter) -> Option<Peripheral> {
