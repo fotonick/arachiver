@@ -54,6 +54,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // find the device we're interested in
     let sensor = find_sensor(&central).await.unwrap();
     central.stop_scan().await.unwrap();
+    {
+        let local_name = sensor.properties().await.unwrap().unwrap().local_name.unwrap();
+        println!("{}\n{}", local_name, "=".repeat(local_name.len()));
+    }
 
     // connect to the device
     sensor.connect().await?;
@@ -70,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let sleep_future = time::sleep(Duration::from_secs(300));
         let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
         let co2_measurement: CO2Measurement = From::from(&raw_c02_measurement[..]);
-        println!("Current sensor reading: {}", co2_measurement);
+        println!("{}", co2_measurement);
         sleep_future.await;
     }
 }
