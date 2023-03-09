@@ -1,11 +1,14 @@
-use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
+use tokio::task::JoinSet;
+
+use btleplug::Error as BtleplugError;
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Adapter, Manager, Peripheral};
+use btleplug::platform::{Manager, Peripheral};
 use uuid::{Uuid, uuid};
 
+const SENSOR_SERVICE_UUID: Uuid = uuid!("f0cd1400-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID: Uuid = uuid!("f0cd1503-95da-4f4b-9ac8-aa55d312af0c");
 
 #[derive(Debug)]
@@ -36,27 +39,8 @@ impl fmt::Display for CO2Measurement {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let manager = Manager::new().await.unwrap();
-
-    // get the first bluetooth adapter
-    let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().nth(0).unwrap();
-
-    // start scanning for devices
-    central.start_scan(ScanFilter::default()).await?;
-    // instead of waiting, you can use central.events() to get a stream which will
-    // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    // find the device we're interested in
-    let sensor = find_sensor(&central).await.unwrap();
-    central.stop_scan().await.unwrap();
-    {
-        let local_name = sensor.properties().await.unwrap().unwrap().local_name.unwrap();
-        println!("{}\n{}", local_name, "=".repeat(local_name.len()));
-    }
+async fn get_sensor_data(sensor: &Peripheral) -> Result<(String, CO2Measurement), BtleplugError> {
+    let local_name = sensor.properties().await.expect("expect property result").expect("expect some properties").local_name.unwrap();
 
     // connect to the device
     sensor.connect().await?;
@@ -70,23 +54,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // dance party
     let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
-    let co2_measurement: CO2Measurement = From::from(&raw_c02_measurement[..]);
-    println!("{}", co2_measurement);
-    Ok(())
+    Ok((local_name, From::from(&raw_c02_measurement[..])))
 }
 
-async fn find_sensor(central: &Adapter) -> Option<Peripheral> {
-    for p in central.peripherals().await.unwrap() {
-        if p.properties()
-            .await
-            .unwrap()
-            .unwrap()
-            .local_name
-            .iter()
-            .any(|name| name.contains("Aranet4"))
-        {
-            return Some(p);
+fn print_sensor_data(sensor_name: &str, co2_measurement: CO2Measurement) {
+    println!("{}\n{}\n{}", sensor_name, "=".repeat(sensor_name.len()), co2_measurement);
+}
+
+#[tokio::main]
+async fn main() -> Result<(), BtleplugError> {
+    let manager = Manager::new().await.unwrap();
+
+    // get the first bluetooth adapter
+    let adapters = manager.adapters().await?;
+    let central = adapters.into_iter().nth(0).unwrap();
+
+    // start scanning for devices
+    central.start_scan(ScanFilter { services: vec![SENSOR_SERVICE_UUID] }).await?;
+    // instead of waiting, you can use central.events() to get a stream which will
+    // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // query devices concurrently
+    let mut set = JoinSet::new();
+    for peripheral in central.peripherals().await.unwrap() {
+        let local_name = peripheral.properties().await.expect("expect property result").expect("expect some properties").local_name;
+        if local_name.iter().any(|n| n.contains("Aranet4")) {
+            set.spawn(async move { get_sensor_data(&peripheral).await });
         }
     }
-    None
+
+    // print serially as results are ready
+    while let Some(Ok(Ok((local_name, data)))) = set.join_next().await {
+        print_sensor_data(&local_name, data);
+    }
+    central.stop_scan().await.unwrap();
+    Ok(())
 }
