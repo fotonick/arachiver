@@ -73,3 +73,121 @@ const aranetServices = {
   },
 }
 ```
+
+Ref: https://github.com/ariccio/COVID-CO2-tracker/blob/main/co2_client/src/features/bluetooth/notes.md
+
+```
+    "F0CD2005-95DA-4F4B-9AC8-AA55D312AF0C" likely contains all logged data? Done in a super complex multi-step async function in readLogData:
+        value: function (t, n) {
+            var u, s, c, f, h, v, b, x, I, R, T, C, S, P, U, M, N = this;
+            return o.default.async(function (O) {
+                for (;;) switch (O.prev = O.next) {
+                case 0:
+                    return O.next = 2, o.default.awrap(w.default.read(t.id, k, "F0CD2005-95DA-4F4B-9AC8-AA55D312AF0C"));
+                case 2:
+                    if (u = O.sent, s = Math.floor(Date.now() / 1e3), c = y.default.Buffer.from(u), 0 !== (f = c.readUInt8(0))) {
+                        O.next = 8;
+                        break
+                    }
+                    throw 'error in parameters';
+                case 8:
+                    if (129 !== f) {
+                        O.next = 11;
+                        break
+                    }
+                    return D.default.log('reading in progresss. schedule reading logs after 1 second'), O.abrupt("return", (0, E.delayed)(1e3).then(function () {
+                        return N.readLogData(t, n)
+                    }));
+                case 11:
+                    if (h = Object.keys(F).find(function (t) {
+                            return F[t] === f
+                        })) {
+                        O.next = 14;
+                        break
+                    }
+                    throw "unknown measurement " + f;
+                case 14:
+                    v = c.readUInt16LE(1), b = c.readUInt16LE(3), x = c.readUInt16LE(5), I = c.readUInt16LE(7), R = c.readUInt8(9), T = s - (x + b * v), C = 0;
+                case 21:
+                    if (!(C < R)) {
+                        O.next = 32;
+                        break
+                    }
+                    if (0 !== (S = I + C)) {
+                        O.next = 25;
+                        break
+                    }
+                    return O.abrupt("continue", 29);
+                case 25:
+                    P = h === A.HUMIDITY ? c.readUInt8(10 + C) : h === A.TEMPERATURE ? c.readInt16LE(10 + 2 * C) : c.readUInt16LE(10 + 2 * C), U = P * L[h], n[M = T + S * v] = (0, l.default)({}, n[M], (0, p.default)({}, h, U));
+                case 29:
+                    C++, O.next = 21;
+                    break;
+                case 32:
+                    if (0 === R) {
+                        O.next = 34;
+                        break
+                    }
+                    return O.abrupt("return", this.readLogData(t, n));
+                case 34:
+                case "end":
+                    return O.stop()
+                }
+
+    There's also a loadDataLogV2, which is curious, since it also writes to the "set history parameter":
+        var n, u, s, f, h, p, v, y, x, A, I, R, T, C, S, P, U, L, M, N, O = this;
+        return o.default.async(function (H) {
+            for (;;) switch (H.prev = H.next) {
+            case 0:
+                return u = (0, l.default)({}, null == (n = b.default.getState().logs) ? void 0 : n[t.id]), s = Date.now() / 1e3, Object.keys(u).forEach(function (t) {
+                    s - t > 1209600 && delete u[t]
+                }), H.next = 5, o.default.awrap((0, E.retry)(5, function () {
+                    return O.connectToDevice(t)
+                }));
+            case 5:
+                return H.prev = 5, H.next = 8, o.default.awrap((0, E.retry)(5, function () {
+                    return O.retrieveServices(t)
+                }));
+            case 8:
+                return H.next = 10, o.default.awrap(this.getReadingsIntervalAndTimePassed(t.id));
+            case 10:
+                return f = H.sent, h = f.readingsInterval, p = f.timePassed, v = Math.round(Date.now() / 1e3) - p, H.next = 16, o.default.awrap(this.getLoggedRecordCount(t));
+            case 16:
+                y = H.sent, x = v - y * h, A = Object.keys(u), I = A.length, R = A[I - 1] - A[I - 2] > h ? 0 : Object.keys(u).reduce(function (t, n) {
+                    return isNaN(n) || t > n ? t : parseInt(n)
+                }, 0), T = 3, C = Math.max(0, Math.floor((R - x) / h) - T), S = B(C, 2), P = 0, U = Object.values(F);
+            case 25:
+                if (!(P < U.length)) {
+                    H.next = 34;
+                    break
+                }
+                return L = U[P], H.next = 29, o.default.awrap(w.default.write(t.id, k, "F0CD1402-95DA-4F4B-9AC8-AA55D312AF0C", [97, L].concat((0, c.default)(S))));
+            case 29:
+                return H.next = 31, o.default.awrap(this.readLogData(t, u));
+            case 31:
+                P++, H.next = 25;
+                break;
+            case 34:
+                return H.prev = 34, H.next = 37, o.default.awrap(this.disconnectFromDevice(t).catch(D.default.log));
+            case 37:
+                return H.finish(34);
+            case 38:
+                M = Object.keys(u), N = M.shift() % 60, M.forEach(function (t) {
+                    var n = t % 60;
+                    if (n !== N) {
+                        var s = t - n + N;
+                        u[s] = u[s] || {}, Object.keys(F).forEach(function (n) {
+                            var o;
+                            u[s][n] = u[s][n] || (null == (o = u[t]) ? void 0 : o[n]) || null
+                        }), delete u[t]
+                    }
+                }), b.default.dispatch({
+                    type: 'setLogs',
+                    device: t,
+                    payload: u
+                });
+            case 42:
+            case "end":
+                return H.stop()
+            }
+```
