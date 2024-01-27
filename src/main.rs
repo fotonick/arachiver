@@ -2,23 +2,86 @@ use std::fmt;
 use std::time::Duration;
 
 use anyhow::{anyhow, Error as AnyhowError};
+use btleplug::api::Characteristic;
 use btleplug::api::{
-    bleuuid::uuid_from_u16, Central, Manager as _, Peripheral as _, ScanFilter, WriteType,
+    bleuuid::uuid_from_u16, Central, CharPropFlags, Manager as _, Peripheral as _, ScanFilter,
+    WriteType,
 };
 use btleplug::platform::{Manager, Peripheral};
 use btleplug::Error as BtleplugError;
 use futures::future::join_all;
+use futures::StreamExt;
+use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
 const ARANET4_SERVICE_UUID: Uuid = uuid_from_u16(0xfce0);
 const ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID: Uuid =
     uuid!("f0cd1503-95da-4f4b-9ac8-aa55d312af0c");
-const ARANET4_CO2_LOGS_CHARACTERISTIC_UUID: Uuid = uuid!("f0cd2005-95da-4f4b-9ac8-aa55d312af0c");
-const ARANET4_MEASUREMENT_INTERVAL_UUID: Uuid = uuid!("f0cd2002-95da-4f4b-9ac8-aa55d312af0c");
-const ARANET_SET_INTERVAL_UUID: Uuid = uuid!("f0cd1402-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_NOTIFY_HISTORY_UUID: Uuid = uuid!("f0cd2003-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_COMMAND_UUID: Uuid = uuid!("f0cd1402-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_TOTAL_READINGS_UUID: Uuid = uuid!("f0cd2001-95da-4f4b-9ac8-aa55d312af0c");
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DataType {
+    Temperature = 1,
+    Humidity = 2,
+    Pressure = 3,
+    CO2 = 4,
+}
+
+impl TryFrom<u8> for DataType {
+    type Error = ();
+
+    fn try_from(n: u8) -> Result<Self, Self::Error> {
+        match n {
+            1 => Ok(DataType::Temperature),
+            2 => Ok(DataType::Humidity),
+            3 => Ok(DataType::Pressure),
+            4 => Ok(DataType::CO2),
+            _ => Err(()),
+        }
+    }
+}
+
+impl DataType {
+    const fn get_label(self: Self) -> &'static str {
+        match self {
+            DataType::Temperature => &"Temperature (°C)",
+            DataType::Humidity => &"Humidity (%)",
+            DataType::Pressure => &"Pressure (mbar)",
+            DataType::CO2 => &"CO₂ (ppm)",
+        }
+    }
+    const fn get_multiplier(self: Self) -> f32 {
+        match self {
+            DataType::Temperature => 0.05,
+            DataType::Humidity => 1.0,
+            DataType::Pressure => 0.1,
+            DataType::CO2 => 1.0,
+        }
+    }
+
+    const fn get_bytes_per_elem(self: Self) -> usize {
+        match self {
+            DataType::Temperature => 2,
+            DataType::Humidity => 1,
+            DataType::Pressure => 2,
+            DataType::CO2 => 2,
+        }
+    }
+
+    const fn get_display_precision(self: Self) -> usize {
+        match self {
+            DataType::Temperature => 2,
+            DataType::Humidity => 0,
+            DataType::Pressure => 1,
+            DataType::CO2 => 0,
+        }
+    }
+}
 
 #[derive(Debug)]
-struct CO2Measurement {
+struct CurrentSensorMeasurement {
     co2: u16,
     temperature: f32,
     pressure: f32,
@@ -26,9 +89,9 @@ struct CO2Measurement {
     battery: u8,
 }
 
-impl From<&[u8]> for CO2Measurement {
+impl From<&[u8]> for CurrentSensorMeasurement {
     fn from(item: &[u8]) -> Self {
-        CO2Measurement {
+        CurrentSensorMeasurement {
             co2: u16::from_le_bytes([item[0], item[1]]),
             temperature: u16::from_le_bytes([item[2], item[3]]) as f32 / 20.0,
             pressure: u16::from_le_bytes([item[4], item[5]]) as f32 / 10.0,
@@ -38,7 +101,7 @@ impl From<&[u8]> for CO2Measurement {
     }
 }
 
-impl fmt::Display for CO2Measurement {
+impl fmt::Display for CurrentSensorMeasurement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -48,95 +111,43 @@ impl fmt::Display for CO2Measurement {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum LogStatus {
-    ErrorInArguments,
-    NothingNew,
-    Four,
-    ReadInProgress,
-}
-
-impl TryFrom<u8> for LogStatus {
-    type Error = BtleplugError;
-    fn try_from(value: u8) -> Result<LogStatus, Self::Error> {
-        match value {
-            0 => Ok(LogStatus::ErrorInArguments),
-            3 => Ok(LogStatus::NothingNew),
-            4 => Ok(LogStatus::Four),
-            129 => Ok(LogStatus::ReadInProgress),
-            _ => Err(BtleplugError::Other(
-                format!("invalid log status {}", value).into(),
-            )),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct HistoryResponseHeader {
-    code: LogStatus, // f; 0 == error in parameters; 129 == reading in progress; maybe what kind of data we're looking at?; 3 == humidity; 4 == C02
-    interval_s: u16, // v; 60 or 300; sampling interval?
-    total_samples: u16, // b; 195 or 2016; how many samples in memory
-    time_since_last_s: u16, // x; 21 or 10 or 4; how long since last sample
-    start_index: u16, // I; 4620 or 1804 or 1687; start index of current packet
-    packet_num_elements: u8, // R; elements in current packet
-
-                     // s == current time in seconds
-                     // S = I + C == current sample out of total
-                     // T = s - (x + b * v) == start time
-                     // L[h] is an array of scale factors (h is some lookup of f)
-                     // P = value
-                     // U = P * L[h] == transformed value
-                     // n == output array
-                     // k == UUID of characteristic
+    history_type: DataType,
+    start_index: u16,    // v; 60 or 300; sampling interval?
+    packet_num_elem: u8, // b; 195 or 2016; how many samples in memory
 }
 
 impl From<&[u8]> for HistoryResponseHeader {
     fn from(item: &[u8]) -> Self {
         HistoryResponseHeader {
-            code: LogStatus::try_from(item[0]).unwrap(),
-            interval_s: u16::from_le_bytes([item[1], item[2]]),
-            total_samples: u16::from_le_bytes([item[3], item[4]]),
-            time_since_last_s: u16::from_le_bytes([item[5], item[6]]),
-            start_index: u16::from_le_bytes([item[7], item[8]]),
-            packet_num_elements: item[9],
+            history_type: DataType::try_from(item[0]).unwrap(),
+            start_index: u16::from_le_bytes([item[1], item[2]]),
+            packet_num_elem: item[3],
         }
     }
 }
 
 impl fmt::Display for HistoryResponseHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "code: {:?}\ninterval_s: {}\ntotal_samples: {}\ntime_since_last_s: {}\nstart_index: {}\npacket_num_elements: {}\n",
-            self.code, self.interval_s, self.total_samples, self.time_since_last_s, self.start_index, self.packet_num_elements)
+        write!(
+            f,
+            "history_type: {:?}\nstart_index: {}\npacket_num_elem: {}",
+            self.history_type, self.start_index, self.packet_num_elem
+        )
     }
 }
 
-async fn read_log(sensor: &Peripheral) -> Result<(HistoryResponseHeader, Vec<u8>), BtleplugError> {
-    let chars = sensor.characteristics();
-    let log_char = chars
-        .iter()
-        .find(|c| c.uuid == ARANET4_CO2_LOGS_CHARACTERISTIC_UUID)
-        .unwrap();
-    let mut log_data = sensor.read(log_char).await.unwrap();
-    let mut header: HistoryResponseHeader = From::from(&log_data[..10]);
-    while header.code == LogStatus::ReadInProgress {
-        println!("reading in progress. schedule reading logs after 1 second");
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        log_data = sensor.read(log_char).await.unwrap();
-    }
-    if header.code == LogStatus::ErrorInArguments {
-        return Err(BtleplugError::Other(format!("Invalid argument").into()));
-    }
-    while header.packet_num_elements != 0 {
-        header = From::from(&log_data[..10]);
-        log_data = sensor.read(log_char).await.unwrap();
-    }
-    let payload = log_data.split_off(10); // copy all but the first ten bytes
-    Ok((header, payload))
+async fn get_total_readings(sensor: &Peripheral) -> Result<u16, BtleplugError> {
+    let char = get_sensor_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID).unwrap();
+    let bytes = sensor.read(&char).await?;
+    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
+    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
 }
 
 async fn get_current_sensor_data(
     sensor: &Peripheral,
-) -> Result<(String, CO2Measurement), BtleplugError> {
+) -> Result<(String, CurrentSensorMeasurement), BtleplugError> {
     let local_name = sensor
         .properties()
         .await
@@ -163,93 +174,148 @@ async fn get_current_sensor_data(
     Ok((local_name, From::from(&raw_c02_measurement[..])))
 }
 
-async fn update_sensor_log(sensor: &Peripheral) -> Result<(String, Vec<u8>), BtleplugError> {
-    let local_name = sensor
-        .properties()
-        .await
-        .expect("expect property result")
-        .expect("expect some properties")
-        .local_name
-        .unwrap();
-
-    // connect to the device
-    sensor.connect().await?;
-
-    // discover services and characteristics
-    sensor.discover_services().await?;
-
-    // historical data on device
-    let (header, log_data) = read_log(sensor).await?;
-    println!("header\n======\n{}\n", header);
-    Ok((local_name, log_data))
-}
-
-async fn get_sensor_log(sensor: &Peripheral) -> Result<(String, Vec<u8>), BtleplugError> {
-    let local_name = sensor
-        .properties()
-        .await
-        .expect("expect property result")
-        .expect("expect some properties")
-        .local_name
-        .unwrap();
-
-    // connect to the device
-    sensor.connect().await?;
-
-    // discover services and characteristics
-    sensor.discover_services().await?;
-
+fn get_sensor_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
     // find the characteristic we want
     let chars = sensor.characteristics();
-
-    // TODO: Attempt to set measurement interval to reset the devices internal knowledge of what
-    //       has previously been queried. This isn't yet right.
-    let get_interval_char = chars
-        .iter()
-        .find(|c| c.uuid == ARANET4_MEASUREMENT_INTERVAL_UUID)
-        .unwrap();
-    let set_interval_char = chars
-        .iter()
-        .find(|c| c.uuid == ARANET_SET_INTERVAL_UUID)
-        .unwrap();
-    let interval_date = sensor.read(get_interval_char).await?;
-    sensor
-        .write(set_interval_char, &interval_date, WriteType::WithResponse)
-        .await?;
-
-    let (header, log_data) = read_log(sensor).await?;
-    println!("header\n======\n{}\n", header);
-    Ok((local_name, log_data))
+    chars.iter().cloned().find(|c| c.uuid == char_uuid)
 }
 
-fn print_sensor_data(sensor_name: &str, co2_measurement: CO2Measurement) {
+async fn get_history_bytes(
+    sensor: &Peripheral,
+    data_type: DataType,
+) -> Result<Vec<u8>, BtleplugError> {
+    // connect to the device
+    sensor.connect().await?;
+
+    // discover services and characteristics
+    sensor.discover_services().await?;
+
+    let subscribe_char = get_sensor_characteristic(sensor, ARANET4_NOTIFY_HISTORY_UUID).unwrap();
+    let command_char = get_sensor_characteristic(sensor, ARANET4_COMMAND_UUID).unwrap();
+    assert!(
+        subscribe_char.properties.contains(CharPropFlags::NOTIFY),
+        "No NOTIFY flag on subscribe characteristic!"
+    );
+
+    // Perform the arcane ritual
+    let total_readings = get_total_readings(sensor).await?;
+    let get_history_command_bytes: &[u8] = &[
+        0x82,
+        data_type as u8,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        (total_readings & 0xFF) as u8,
+        (total_readings >> 8) as u8,
+    ];
+    sensor.unsubscribe(&subscribe_char).await?;
+    sensor
+        .write(
+            &command_char,
+            get_history_command_bytes,
+            WriteType::WithResponse,
+        )
+        .await?;
+    sensor.subscribe(&subscribe_char).await?;
+
+    // Now get that sweet, sweet data
+    let bytes_per_elem = data_type.get_bytes_per_elem();
+    let mut notification_stream = sensor.notifications().await?;
+    let mut history_bytes = Vec::new();
+    while let Some(data) = notification_stream.next().await {
+        assert!(
+            data.uuid == ARANET4_NOTIFY_HISTORY_UUID,
+            "Expected notification UUID to match ARANET4_NOTIFY_HISTORY_UUID"
+        );
+        let header = HistoryResponseHeader::from(&data.value[..4]);
+        assert!(
+            header.history_type == data_type,
+            "History type doesn't match what we requested"
+        );
+        let bytes_end = 4 + bytes_per_elem * (header.packet_num_elem as usize);
+        history_bytes.extend_from_slice(&data.value[4..bytes_end]);
+        if history_bytes.len() >= bytes_per_elem * (total_readings as usize) {
+            break;
+        }
+    }
+    sensor.unsubscribe(&subscribe_char).await?;
+    assert!(
+        history_bytes.len() == bytes_per_elem * (total_readings as usize),
+        "Received unexpected number of bytes"
+    );
+    Ok(history_bytes)
+}
+
+async fn get_history_u16(
+    sensor: &Peripheral,
+    data_type: DataType,
+) -> Result<Vec<u16>, BtleplugError> {
+    let history_bytes = get_history_bytes(sensor, data_type).await?;
+
+    // Convert u8 to u16
+    let history_data = history_bytes
+        .chunks_exact(2)
+        .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+    Ok(history_data)
+}
+
+fn print_current_sensor_data(sensor_name: &str, measurement: CurrentSensorMeasurement) {
     println!(
         "{}\n{}\n{}",
         sensor_name,
         "=".repeat(sensor_name.len()),
-        co2_measurement
+        measurement
     );
 }
 
-fn print_log_data(sensor_name: &str, data: &[u8]) {
-    println!(
-        "{}\n{}\n{:?}",
-        sensor_name,
-        "=".repeat(sensor_name.len()),
-        data
+fn print_history<T>(data_type: DataType, data: &[T])
+where
+    f32: std::convert::From<T>,
+    T: Copy,
+{
+    let dt_name = data_type.get_label();
+    let multiplier = data_type.get_multiplier();
+    let precision = data_type.get_display_precision();
+    print!(
+        "{}\n{}\n[",
+        dt_name,
+        "=".repeat(dt_name.graphemes(true).count())
     );
+    if data.len() > 0 {
+        print!("{:.*}", precision, Into::<f32>::into(data[0]) * multiplier)
+    }
+    if data.len() > 1 {
+        data[1..]
+            .iter()
+            .for_each(|x| print!(", {:.*}", precision, Into::<f32>::into(*x) * multiplier));
+    }
+    println!("]")
 }
+
 async fn process_sensor(sensor: &Peripheral) -> () {
     match get_current_sensor_data(&sensor).await {
-        Ok((local_name, data)) => print_sensor_data(&local_name, data),
+        Ok((local_name, data)) => print_current_sensor_data(&local_name, data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    match get_sensor_log(&sensor).await {
-        Ok((local_name, data)) => print_log_data(&local_name, &data),
+    match get_history_u16(&sensor, DataType::Temperature).await {
+        Ok(data) => print_history(DataType::Temperature, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_bytes(&sensor, DataType::Humidity).await {
+        Ok(data) => print_history(DataType::Humidity, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_u16(&sensor, DataType::Pressure).await {
+        Ok(data) => print_history(DataType::Pressure, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_u16(&sensor, DataType::CO2).await {
+        Ok(data) => print_history(DataType::CO2, &data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
 }
-
 #[tokio::main]
 async fn main() -> Result<(), AnyhowError> {
     let manager = Manager::new().await.unwrap();
@@ -267,7 +333,7 @@ async fn main() -> Result<(), AnyhowError> {
     // central.start_scan(ScanFilter::default()).await?;
     // instead of waiting, you can use central.events() to get a stream which will
     // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // query devices concurrently
     let peripherals = central.peripherals().await.unwrap();
