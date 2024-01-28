@@ -14,7 +14,7 @@ async fn process_sensor(sensor: &Peripheral) {
     };
     println!(
         "Computed start time = {}",
-        get_history_start_time(sensor).await.unwrap().to_string()
+        get_history_start_time(sensor).await.unwrap()
     );
     match get_history_u16(sensor, DataType::Temperature).await {
         Ok(data) => print_history(DataType::Temperature, &data),
