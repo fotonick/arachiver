@@ -297,13 +297,13 @@ where
     f32: std::convert::From<T>,
     T: Copy,
 {
-    let dt_name = data_type.label();
+    let label = data_type.label();
     let multiplier = data_type.multiplier();
     let precision = data_type.display_precision();
     print!(
         "{}\n{}\n[",
-        dt_name,
-        "=".repeat(dt_name.graphemes(true).count())
+        label,
+        "=".repeat(label.graphemes(true).count())
     );
     if data.len() > 0 {
         print!("{:.*}", precision, Into::<f32>::into(data[0]) * multiplier)
