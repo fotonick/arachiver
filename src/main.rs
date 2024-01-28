@@ -44,7 +44,7 @@ impl TryFrom<u8> for DataType {
 }
 
 impl DataType {
-    const fn get_label(self: Self) -> &'static str {
+    const fn label(self: Self) -> &'static str {
         match self {
             DataType::Temperature => &"Temperature (°C)",
             DataType::Humidity => &"Humidity (%)",
@@ -52,7 +52,7 @@ impl DataType {
             DataType::CO2 => &"CO₂ (ppm)",
         }
     }
-    const fn get_multiplier(self: Self) -> f32 {
+    const fn multiplier(self: Self) -> f32 {
         match self {
             DataType::Temperature => 0.05,
             DataType::Humidity => 1.0,
@@ -61,7 +61,7 @@ impl DataType {
         }
     }
 
-    const fn get_bytes_per_elem(self: Self) -> usize {
+    const fn bytes_per_elem(self: Self) -> usize {
         match self {
             DataType::Temperature => 2,
             DataType::Humidity => 1,
@@ -70,7 +70,7 @@ impl DataType {
         }
     }
 
-    const fn get_display_precision(self: Self) -> usize {
+    const fn display_precision(self: Self) -> usize {
         match self {
             DataType::Temperature => 2,
             DataType::Humidity => 0,
@@ -220,7 +220,7 @@ async fn get_history_bytes(
     sensor.subscribe(&subscribe_char).await?;
 
     // Now get that sweet, sweet data
-    let bytes_per_elem = data_type.get_bytes_per_elem();
+    let bytes_per_elem = data_type.bytes_per_elem();
     let mut notification_stream = sensor.notifications().await?;
     let mut history_bytes = Vec::new();
     while let Some(data) = notification_stream.next().await {
@@ -275,9 +275,9 @@ where
     f32: std::convert::From<T>,
     T: Copy,
 {
-    let dt_name = data_type.get_label();
-    let multiplier = data_type.get_multiplier();
-    let precision = data_type.get_display_precision();
+    let dt_name = data_type.label();
+    let multiplier = data_type.multiplier();
+    let precision = data_type.display_precision();
     print!(
         "{}\n{}\n[",
         dt_name,
