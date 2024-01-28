@@ -1,5 +1,5 @@
-use std::fmt;
 use std::time::Duration;
+use std::{fmt, u16, u8};
 
 use anyhow::{anyhow, Error as AnyhowError};
 use btleplug::api::Characteristic;
@@ -15,8 +15,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
 const ARANET4_SERVICE_UUID: Uuid = uuid_from_u16(0xfce0);
-const ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID: Uuid =
-    uuid!("f0cd1503-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_CURRENT_READINGS_UUID: Uuid = uuid!("f0cd3001-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_NOTIFY_HISTORY_UUID: Uuid = uuid!("f0cd2003-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_COMMAND_UUID: Uuid = uuid!("f0cd1402-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_TOTAL_READINGS_UUID: Uuid = uuid!("f0cd2001-95da-4f4b-9ac8-aa55d312af0c");
@@ -83,20 +82,26 @@ impl DataType {
 #[derive(Debug)]
 struct CurrentSensorMeasurement {
     co2: u16,
-    temperature: f32,
-    pressure: f32,
+    temperature: u16,
+    pressure: u16,
     humidity: u8,
     battery: u8,
+    status: u8,
+    interval: u16,
+    ago: u16,
 }
 
 impl From<&[u8]> for CurrentSensorMeasurement {
     fn from(item: &[u8]) -> Self {
         CurrentSensorMeasurement {
             co2: u16::from_le_bytes([item[0], item[1]]),
-            temperature: u16::from_le_bytes([item[2], item[3]]) as f32 / 20.0,
-            pressure: u16::from_le_bytes([item[4], item[5]]) as f32 / 10.0,
+            temperature: u16::from_le_bytes([item[2], item[3]]),
+            pressure: u16::from_le_bytes([item[4], item[5]]),
             humidity: item[6],
             battery: item[7],
+            status: item[8],
+            interval: u16::from_le_bytes([item[9], item[10]]),
+            ago: u16::from_le_bytes([item[11], item[12]]),
         }
     }
 }
@@ -105,8 +110,19 @@ impl fmt::Display for CurrentSensorMeasurement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CO₂: {} ppm\nT: {}°C\nP: {} mbar\nHumidity: {}%\nBattery: {}%\n",
-            self.co2, self.temperature, self.pressure, self.humidity, self.battery
+            "CO₂: {:.*} ppm\nT: {:.*}°C\nP: {:.*} mbar\nHumidity: {:.*}%\nBattery: {}%\nStatus: {}\nInterval: {} s\nAgo: {} s\n",
+            DataType::CO2.display_precision(),
+            (self.co2 as f32) * DataType::CO2.multiplier(),
+            DataType::Temperature.display_precision(),
+            (self.temperature as f32) * DataType::Temperature.multiplier(),
+            DataType::Pressure.display_precision(),
+            (self.pressure as f32) * DataType::Pressure.multiplier(),
+            DataType::Humidity.display_precision(),
+            (self.humidity as f32) * DataType::Humidity.multiplier(),
+            self.battery,
+            self.status,
+            self.interval,
+            self.ago,
         )
     }
 }
@@ -132,8 +148,10 @@ impl fmt::Display for HistoryResponseHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "history_type: {:?}\nstart_index: {}\npacket_num_elem: {}",
-            self.history_type, self.start_index, self.packet_num_elem
+            "history_type: {}\nstart_index: {}\npacket_num_elem: {}",
+            self.history_type.label(),
+            self.start_index,
+            self.packet_num_elem
         )
     }
 }
@@ -168,10 +186,14 @@ async fn get_current_sensor_data(
     // instantaneous measurement for nice printing
     let co2_char = chars
         .iter()
-        .find(|c| c.uuid == ARANET4_CO2_MEASUREMENT_CHARACTERISTIC_UUID)
+        .find(|c| c.uuid == ARANET4_CURRENT_READINGS_UUID)
         .unwrap();
-    let raw_c02_measurement = sensor.read(co2_char).await.unwrap();
-    Ok((local_name, From::from(&raw_c02_measurement[..])))
+    let current_readings = sensor.read(co2_char).await.unwrap();
+    assert!(
+        current_readings.len() == 13,
+        "Unexpected current measurement length"
+    );
+    Ok((local_name, From::from(&current_readings[..])))
 }
 
 fn get_sensor_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
@@ -299,22 +321,22 @@ async fn process_sensor(sensor: &Peripheral) -> () {
         Ok((local_name, data)) => print_current_sensor_data(&local_name, data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    match get_history_u16(&sensor, DataType::Temperature).await {
-        Ok(data) => print_history(DataType::Temperature, &data),
-        Err(e) => eprintln!("Oh no: {}", e),
-    };
-    match get_history_bytes(&sensor, DataType::Humidity).await {
-        Ok(data) => print_history(DataType::Humidity, &data),
-        Err(e) => eprintln!("Oh no: {}", e),
-    };
-    match get_history_u16(&sensor, DataType::Pressure).await {
-        Ok(data) => print_history(DataType::Pressure, &data),
-        Err(e) => eprintln!("Oh no: {}", e),
-    };
-    match get_history_u16(&sensor, DataType::CO2).await {
-        Ok(data) => print_history(DataType::CO2, &data),
-        Err(e) => eprintln!("Oh no: {}", e),
-    };
+    // match get_history_u16(&sensor, DataType::Temperature).await {
+    //     Ok(data) => print_history(DataType::Temperature, &data),
+    //     Err(e) => eprintln!("Oh no: {}", e),
+    // };
+    // match get_history_bytes(&sensor, DataType::Humidity).await {
+    //     Ok(data) => print_history(DataType::Humidity, &data),
+    //     Err(e) => eprintln!("Oh no: {}", e),
+    // };
+    // match get_history_u16(&sensor, DataType::Pressure).await {
+    //     Ok(data) => print_history(DataType::Pressure, &data),
+    //     Err(e) => eprintln!("Oh no: {}", e),
+    // };
+    // match get_history_u16(&sensor, DataType::CO2).await {
+    //     Ok(data) => print_history(DataType::CO2, &data),
+    //     Err(e) => eprintln!("Oh no: {}", e),
+    // };
 }
 #[tokio::main]
 async fn main() -> Result<(), AnyhowError> {
