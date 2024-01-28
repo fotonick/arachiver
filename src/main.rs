@@ -43,15 +43,15 @@ impl TryFrom<u8> for DataType {
 }
 
 impl DataType {
-    const fn label(self: Self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
-            DataType::Temperature => &"Temperature (°C)",
-            DataType::Humidity => &"Humidity (%)",
-            DataType::Pressure => &"Pressure (mbar)",
-            DataType::CO2 => &"CO₂ (ppm)",
+            DataType::Temperature => "Temperature (°C)",
+            DataType::Humidity => "Humidity (%)",
+            DataType::Pressure => "Pressure (mbar)",
+            DataType::CO2 => "CO₂ (ppm)",
         }
     }
-    const fn multiplier(self: Self) -> f32 {
+    const fn multiplier(self) -> f32 {
         match self {
             DataType::Temperature => 0.05,
             DataType::Humidity => 1.0,
@@ -60,7 +60,7 @@ impl DataType {
         }
     }
 
-    const fn bytes_per_elem(self: Self) -> usize {
+    const fn bytes_per_elem(self) -> usize {
         match self {
             DataType::Temperature => 2,
             DataType::Humidity => 1,
@@ -69,7 +69,7 @@ impl DataType {
         }
     }
 
-    const fn display_precision(self: Self) -> usize {
+    const fn display_precision(self) -> usize {
         match self {
             DataType::Temperature => 2,
             DataType::Humidity => 0,
@@ -199,7 +199,7 @@ async fn get_current_sensor_data(
 fn get_sensor_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
     // find the characteristic we want
     let chars = sensor.characteristics();
-    chars.iter().cloned().find(|c| c.uuid == char_uuid)
+    chars.iter().find(|c| c.uuid == char_uuid).cloned()
 }
 
 async fn get_history_bytes(
@@ -305,7 +305,7 @@ where
         label,
         "=".repeat(label.graphemes(true).count())
     );
-    if data.len() > 0 {
+    if !data.is_empty() {
         print!("{:.*}", precision, Into::<f32>::into(data[0]) * multiplier)
     }
     if data.len() > 1 {
@@ -316,27 +316,27 @@ where
     println!("]")
 }
 
-async fn process_sensor(sensor: &Peripheral) -> () {
-    match get_current_sensor_data(&sensor).await {
+async fn process_sensor(sensor: &Peripheral) {
+    match get_current_sensor_data(sensor).await {
         Ok((local_name, data)) => print_current_sensor_data(&local_name, data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    // match get_history_u16(&sensor, DataType::Temperature).await {
-    //     Ok(data) => print_history(DataType::Temperature, &data),
-    //     Err(e) => eprintln!("Oh no: {}", e),
-    // };
-    // match get_history_bytes(&sensor, DataType::Humidity).await {
-    //     Ok(data) => print_history(DataType::Humidity, &data),
-    //     Err(e) => eprintln!("Oh no: {}", e),
-    // };
-    // match get_history_u16(&sensor, DataType::Pressure).await {
-    //     Ok(data) => print_history(DataType::Pressure, &data),
-    //     Err(e) => eprintln!("Oh no: {}", e),
-    // };
-    // match get_history_u16(&sensor, DataType::CO2).await {
-    //     Ok(data) => print_history(DataType::CO2, &data),
-    //     Err(e) => eprintln!("Oh no: {}", e),
-    // };
+    match get_history_u16(sensor, DataType::Temperature).await {
+        Ok(data) => print_history(DataType::Temperature, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_bytes(sensor, DataType::Humidity).await {
+        Ok(data) => print_history(DataType::Humidity, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_u16(sensor, DataType::Pressure).await {
+        Ok(data) => print_history(DataType::Pressure, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_history_u16(sensor, DataType::CO2).await {
+        Ok(data) => print_history(DataType::CO2, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
 }
 #[tokio::main]
 async fn main() -> Result<(), AnyhowError> {
@@ -344,7 +344,7 @@ async fn main() -> Result<(), AnyhowError> {
 
     // get the first bluetooth adapter
     let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().nth(0).unwrap();
+    let central = adapters.into_iter().next().unwrap();
 
     // start scanning for devices
     central
