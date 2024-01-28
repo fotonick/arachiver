@@ -157,7 +157,7 @@ impl fmt::Display for HistoryResponseHeader {
 }
 
 async fn get_total_readings(sensor: &Peripheral) -> Result<u16, BtleplugError> {
-    let char = get_sensor_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID).unwrap();
+    let char = get_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID).unwrap();
     let bytes = sensor.read(&char).await?;
     assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
     Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
@@ -180,15 +180,9 @@ async fn get_current_sensor_data(
     // discover services and characteristics
     sensor.discover_services().await?;
 
-    // find the characteristic we want
-    let chars = sensor.characteristics();
-
     // instantaneous measurement for nice printing
-    let co2_char = chars
-        .iter()
-        .find(|c| c.uuid == ARANET4_CURRENT_READINGS_UUID)
-        .unwrap();
-    let current_readings = sensor.read(co2_char).await.unwrap();
+    let co2_char = get_characteristic(sensor, ARANET4_CURRENT_READINGS_UUID).unwrap();
+    let current_readings = sensor.read(&co2_char).await.unwrap();
     assert!(
         current_readings.len() == 13,
         "Unexpected current measurement length"
@@ -196,8 +190,7 @@ async fn get_current_sensor_data(
     Ok((local_name, From::from(&current_readings[..])))
 }
 
-fn get_sensor_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
-    // find the characteristic we want
+fn get_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
     let chars = sensor.characteristics();
     chars.iter().find(|c| c.uuid == char_uuid).cloned()
 }
@@ -212,8 +205,8 @@ async fn get_history_bytes(
     // discover services and characteristics
     sensor.discover_services().await?;
 
-    let subscribe_char = get_sensor_characteristic(sensor, ARANET4_NOTIFY_HISTORY_UUID).unwrap();
-    let command_char = get_sensor_characteristic(sensor, ARANET4_COMMAND_UUID).unwrap();
+    let subscribe_char = get_characteristic(sensor, ARANET4_NOTIFY_HISTORY_UUID).unwrap();
+    let command_char = get_characteristic(sensor, ARANET4_COMMAND_UUID).unwrap();
     assert!(
         subscribe_char.properties.contains(CharPropFlags::NOTIFY),
         "No NOTIFY flag on subscribe characteristic!"
