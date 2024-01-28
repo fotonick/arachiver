@@ -6,6 +6,7 @@ use btleplug::{
 use chrono::{DateTime, Duration, Utc};
 use futures::StreamExt;
 use std::{fmt, u16, u8};
+use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
@@ -17,6 +18,19 @@ const ARANET4_TOTAL_READINGS_UUID: Uuid = uuid!("f0cd2001-95da-4f4b-9ac8-aa55d31
 const ARANET4_TIME_SINCE_UPDATE_UUID: Uuid = uuid!("f0cd2004-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_UPDATE_INTERVAL_UUID: Uuid = uuid!("f0cd2002-95da-4f4b-9ac8-aa55d312af0c");
 
+#[derive(Error, Debug)]
+pub enum Aranet4Error {
+    #[error("There was a Bluetooth error")]
+    Btleplug {
+        #[from]
+        source: BtleplugError,
+    },
+    #[error("Aranet returned a response that didn't match our expectations")]
+    InvalidResponse(String),
+    #[error("Did not find requested characteristic")]
+    CharacteristicNotFound,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DataType {
     Temperature = 1,
@@ -26,7 +40,7 @@ pub enum DataType {
 }
 
 impl TryFrom<u8> for DataType {
-    type Error = ();
+    type Error = Aranet4Error;
 
     fn try_from(n: u8) -> Result<Self, Self::Error> {
         match n {
@@ -34,7 +48,9 @@ impl TryFrom<u8> for DataType {
             2 => Ok(DataType::Humidity),
             3 => Ok(DataType::Pressure),
             4 => Ok(DataType::CO2),
-            _ => Err(()),
+            _ => Err(Aranet4Error::InvalidResponse(
+                "Unknown data type".to_string(),
+            )),
         }
     }
 }
@@ -88,8 +104,8 @@ pub struct CurrentSensorMeasurement {
     ago: u16,
 }
 
-impl From<&[u8]> for CurrentSensorMeasurement {
-    fn from(item: &[u8]) -> Self {
+impl From<[u8; 13]> for CurrentSensorMeasurement {
+    fn from(item: [u8; 13]) -> Self {
         CurrentSensorMeasurement {
             co2: u16::from_le_bytes([item[0], item[1]]),
             temperature: u16::from_le_bytes([item[2], item[3]]),
@@ -127,17 +143,19 @@ impl fmt::Display for CurrentSensorMeasurement {
 #[derive(Debug)]
 struct HistoryResponseHeader {
     history_type: DataType,
-    start_index: u16,    // v; 60 or 300; sampling interval?
-    packet_num_elem: u8, // b; 195 or 2016; how many samples in memory
+    start_index: u16,
+    packet_num_elem: u8,
 }
 
-impl From<&[u8]> for HistoryResponseHeader {
-    fn from(item: &[u8]) -> Self {
-        HistoryResponseHeader {
-            history_type: DataType::try_from(item[0]).unwrap(),
+impl TryFrom<&[u8]> for HistoryResponseHeader {
+    type Error = Aranet4Error;
+
+    fn try_from(item: &[u8]) -> Result<Self, Self::Error> {
+        Ok(HistoryResponseHeader {
+            history_type: DataType::try_from(item[0])?,
             start_index: u16::from_le_bytes([item[1], item[2]]),
             packet_num_elem: item[3],
-        }
+        })
     }
 }
 
@@ -186,30 +204,37 @@ where
     println!("]")
 }
 
-async fn get_total_readings(sensor: &Peripheral) -> Result<u16, BtleplugError> {
-    let char = get_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID).unwrap();
-    let bytes = sensor.read(&char).await?;
-    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
-    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+fn bytes_to_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {
+    if bytes.len() == 2 {
+        Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+    } else {
+        Err(Aranet4Error::InvalidResponse(
+            "Result of total readings is not 2 bytes".to_string(),
+        ))
+    }
 }
 
-async fn get_time_since_update(sensor: &Peripheral) -> Result<u16, BtleplugError> {
-    let char = get_characteristic(sensor, ARANET4_TIME_SINCE_UPDATE_UUID).unwrap();
+async fn get_total_readings(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
+    let char = get_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID)?;
     let bytes = sensor.read(&char).await?;
-    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
-    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+    bytes_to_u16(&bytes)
 }
 
-async fn get_update_interval(sensor: &Peripheral) -> Result<u16, BtleplugError> {
-    let char = get_characteristic(sensor, ARANET4_UPDATE_INTERVAL_UUID).unwrap();
+async fn get_time_since_update(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
+    let char = get_characteristic(sensor, ARANET4_TIME_SINCE_UPDATE_UUID)?;
     let bytes = sensor.read(&char).await?;
-    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
-    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+    bytes_to_u16(&bytes)
+}
+
+async fn get_update_interval(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
+    let char = get_characteristic(sensor, ARANET4_UPDATE_INTERVAL_UUID)?;
+    let bytes = sensor.read(&char).await?;
+    bytes_to_u16(&bytes)
 }
 
 pub async fn get_current_sensor_data(
     sensor: &Peripheral,
-) -> Result<(String, CurrentSensorMeasurement), BtleplugError> {
+) -> Result<(String, CurrentSensorMeasurement), Aranet4Error> {
     let local_name = sensor
         .properties()
         .await
@@ -225,36 +250,46 @@ pub async fn get_current_sensor_data(
     sensor.discover_services().await?;
 
     // instantaneous measurement for nice printing
-    let co2_char = get_characteristic(sensor, ARANET4_CURRENT_READINGS_UUID).unwrap();
-    let current_readings = sensor.read(&co2_char).await.unwrap();
-    assert!(
-        current_readings.len() == 13,
-        "Unexpected current measurement length"
-    );
-    Ok((local_name, From::from(&current_readings[..])))
+    let co2_char = get_characteristic(sensor, ARANET4_CURRENT_READINGS_UUID)?;
+    let measurement_bytes = sensor.read(&co2_char).await?;
+    if measurement_bytes.len() != 13 {
+        return Err(Aranet4Error::InvalidResponse(
+            "Unexpected current measurement length".to_string(),
+        ));
+    }
+    let measurement_bytes: [u8; 13] = measurement_bytes[..13].try_into().unwrap();
+    Ok((local_name, measurement_bytes.into()))
 }
 
-fn get_characteristic(sensor: &Peripheral, char_uuid: Uuid) -> Option<Characteristic> {
+fn get_characteristic(
+    sensor: &Peripheral,
+    char_uuid: Uuid,
+) -> Result<Characteristic, Aranet4Error> {
     let chars = sensor.characteristics();
-    chars.iter().find(|c| c.uuid == char_uuid).cloned()
+    chars
+        .iter()
+        .find(|c| c.uuid == char_uuid)
+        .cloned()
+        .ok_or(Aranet4Error::CharacteristicNotFound)
 }
 
 pub async fn get_history_bytes(
     sensor: &Peripheral,
     data_type: DataType,
-) -> Result<Vec<u8>, BtleplugError> {
+) -> Result<Vec<u8>, Aranet4Error> {
     // connect to the device
     sensor.connect().await?;
 
     // discover services and characteristics
     sensor.discover_services().await?;
 
-    let subscribe_char = get_characteristic(sensor, ARANET4_NOTIFY_HISTORY_UUID).unwrap();
-    let command_char = get_characteristic(sensor, ARANET4_COMMAND_UUID).unwrap();
-    assert!(
-        subscribe_char.properties.contains(CharPropFlags::NOTIFY),
-        "No NOTIFY flag on subscribe characteristic!"
-    );
+    let subscribe_char = get_characteristic(sensor, ARANET4_NOTIFY_HISTORY_UUID)?;
+    let command_char = get_characteristic(sensor, ARANET4_COMMAND_UUID)?;
+    if !subscribe_char.properties.contains(CharPropFlags::NOTIFY) {
+        return Err(Aranet4Error::InvalidResponse(
+            "No NOTIFY flag on subscribe characteristic!".to_string(),
+        ));
+    }
 
     // Perform the arcane ritual
     let total_readings = get_total_readings(sensor).await?;
@@ -283,15 +318,17 @@ pub async fn get_history_bytes(
     let mut notification_stream = sensor.notifications().await?;
     let mut history_bytes = Vec::new();
     while let Some(data) = notification_stream.next().await {
-        assert!(
-            data.uuid == ARANET4_NOTIFY_HISTORY_UUID,
-            "Expected notification UUID to match ARANET4_NOTIFY_HISTORY_UUID"
-        );
-        let header = HistoryResponseHeader::from(&data.value[..4]);
-        assert!(
-            header.history_type == data_type,
-            "History type doesn't match what we requested"
-        );
+        if data.uuid != ARANET4_NOTIFY_HISTORY_UUID {
+            return Err(Aranet4Error::InvalidResponse(
+                "Expected notification UUID to match ARANET4_NOTIFY_HISTORY_UUID".to_string(),
+            ));
+        }
+        let header = HistoryResponseHeader::try_from(&data.value[..4])?;
+        if header.history_type != data_type {
+            return Err(Aranet4Error::InvalidResponse(
+                "History type doesn't match what we requested".to_string(),
+            ));
+        }
         let bytes_end = 4 + bytes_per_elem * (header.packet_num_elem as usize);
         history_bytes.extend_from_slice(&data.value[4..bytes_end]);
         if history_bytes.len() >= bytes_per_elem * (total_readings as usize) {
@@ -299,17 +336,18 @@ pub async fn get_history_bytes(
         }
     }
     sensor.unsubscribe(&subscribe_char).await?;
-    assert!(
-        history_bytes.len() == bytes_per_elem * (total_readings as usize),
-        "Received unexpected number of bytes"
-    );
+    if history_bytes.len() != bytes_per_elem * (total_readings as usize) {
+        return Err(Aranet4Error::InvalidResponse(
+            "Received unexpected number of bytes".to_string(),
+        ));
+    }
     Ok(history_bytes)
 }
 
 pub async fn get_history_u16(
     sensor: &Peripheral,
     data_type: DataType,
-) -> Result<Vec<u16>, BtleplugError> {
+) -> Result<Vec<u16>, Aranet4Error> {
     let history_bytes = get_history_bytes(sensor, data_type).await?;
 
     // Convert u8 to u16
@@ -331,7 +369,7 @@ fn estimate_history_start_time(
     )
 }
 
-pub async fn get_history_start_time(sensor: &Peripheral) -> Result<DateTime<Utc>, BtleplugError> {
+pub async fn get_history_start_time(sensor: &Peripheral) -> Result<DateTime<Utc>, Aranet4Error> {
     sensor.connect().await?;
     let num_samples = get_total_readings(sensor).await?;
     let update_interval = get_update_interval(sensor).await?;
