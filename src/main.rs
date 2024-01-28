@@ -1,4 +1,3 @@
-use std::time::Duration;
 use std::{fmt, u16, u8};
 
 use anyhow::{anyhow, Error as AnyhowError};
@@ -9,6 +8,7 @@ use btleplug::api::{
 };
 use btleplug::platform::{Manager, Peripheral};
 use btleplug::Error as BtleplugError;
+use chrono::{DateTime, Duration, Utc};
 use futures::future::join_all;
 use futures::StreamExt;
 use unicode_segmentation::UnicodeSegmentation;
@@ -19,6 +19,8 @@ const ARANET4_CURRENT_READINGS_UUID: Uuid = uuid!("f0cd3001-95da-4f4b-9ac8-aa55d
 const ARANET4_NOTIFY_HISTORY_UUID: Uuid = uuid!("f0cd2003-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_COMMAND_UUID: Uuid = uuid!("f0cd1402-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_TOTAL_READINGS_UUID: Uuid = uuid!("f0cd2001-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_TIME_SINCE_UPDATE_UUID: Uuid = uuid!("f0cd2004-95da-4f4b-9ac8-aa55d312af0c");
+const ARANET4_UPDATE_INTERVAL_UUID: Uuid = uuid!("f0cd2002-95da-4f4b-9ac8-aa55d312af0c");
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DataType {
@@ -163,6 +165,20 @@ async fn get_total_readings(sensor: &Peripheral) -> Result<u16, BtleplugError> {
     Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
 }
 
+async fn get_time_since_update(sensor: &Peripheral) -> Result<u16, BtleplugError> {
+    let char = get_characteristic(sensor, ARANET4_TIME_SINCE_UPDATE_UUID).unwrap();
+    let bytes = sensor.read(&char).await?;
+    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
+    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+async fn get_update_interval(sensor: &Peripheral) -> Result<u16, BtleplugError> {
+    let char = get_characteristic(sensor, ARANET4_UPDATE_INTERVAL_UUID).unwrap();
+    let bytes = sensor.read(&char).await?;
+    assert!(bytes.len() == 2, "Result of total readings is not 2 bytes");
+    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+}
+
 async fn get_current_sensor_data(
     sensor: &Peripheral,
 ) -> Result<(String, CurrentSensorMeasurement), BtleplugError> {
@@ -276,7 +292,7 @@ async fn get_history_u16(
     Ok(history_data)
 }
 
-fn print_current_sensor_data(sensor_name: &str, measurement: CurrentSensorMeasurement) {
+fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorMeasurement) {
     println!(
         "{}\n{}\n{}",
         sensor_name,
@@ -309,11 +325,40 @@ where
     println!("]")
 }
 
+fn estimate_history_start_time(
+    now: DateTime<Utc>,
+    num_samples: u16,
+    update_interval: u16,
+    since_update: u16,
+) -> DateTime<Utc> {
+    now - Duration::seconds(
+        (num_samples as i64 - 1) * (update_interval as i64) + (since_update as i64),
+    )
+}
+
+async fn get_history_start_time(sensor: &Peripheral) -> Result<DateTime<Utc>, BtleplugError> {
+    sensor.connect().await?;
+    let num_samples = get_total_readings(sensor).await?;
+    let update_interval = get_update_interval(sensor).await?;
+    let since_update = get_time_since_update(sensor).await?;
+    let now: DateTime<Utc> = Utc::now();
+    Ok(estimate_history_start_time(
+        now,
+        num_samples,
+        update_interval,
+        since_update,
+    ))
+}
+
 async fn process_sensor(sensor: &Peripheral) {
     match get_current_sensor_data(sensor).await {
-        Ok((local_name, data)) => print_current_sensor_data(&local_name, data),
+        Ok((local_name, data)) => print_current_sensor_data(&local_name, &data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
+    println!(
+        "Computed start time = {}",
+        get_history_start_time(sensor).await.unwrap().to_string()
+    );
     match get_history_u16(sensor, DataType::Temperature).await {
         Ok(data) => print_history(DataType::Temperature, &data),
         Err(e) => eprintln!("Oh no: {}", e),
@@ -331,6 +376,7 @@ async fn process_sensor(sensor: &Peripheral) {
         Err(e) => eprintln!("Oh no: {}", e),
     };
 }
+
 #[tokio::main]
 async fn main() -> Result<(), AnyhowError> {
     let manager = Manager::new().await.unwrap();
@@ -348,7 +394,7 @@ async fn main() -> Result<(), AnyhowError> {
     // central.start_scan(ScanFilter::default()).await?;
     // instead of waiting, you can use central.events() to get a stream which will
     // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::seconds(3).to_std().unwrap()).await;
 
     // query devices concurrently
     let peripherals = central.peripherals().await.unwrap();
