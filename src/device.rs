@@ -5,6 +5,8 @@ use btleplug::{
 };
 use chrono::{DateTime, Duration, Utc};
 use futures::StreamExt;
+use std::mem::size_of;
+use std::vec::Vec;
 use std::{fmt, u16, u8};
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
@@ -31,64 +33,113 @@ pub enum Aranet4Error {
     CharacteristicNotFound,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DataType {
-    Temperature = 1,
-    Humidity = 2,
-    Pressure = 3,
-    CO2 = 4,
+#[derive(Debug)]
+pub struct SensorData<Storage, const SENSORTYPE: u8> {
+    pub values: Vec<Storage>,
 }
 
-impl TryFrom<u8> for DataType {
+pub trait Metadata {
+    const DISPLAY_MULTIPLIER: f32;
+    const DISPLAY_PRECISION: usize;
+    fn label(&self) -> &'static str;
+}
+
+const TEMPERATURE: u8 = 1;
+const HUMIDITY: u8 = 2;
+const PRESSURE: u8 = 3;
+const CO2: u8 = 4;
+
+type TemperatureData = SensorData<u16, TEMPERATURE>;
+type HumidityData = SensorData<u8, HUMIDITY>;
+type PressureData = SensorData<u16, PRESSURE>;
+type CO2Data = SensorData<u16, CO2>;
+
+impl Metadata for TemperatureData {
+    const DISPLAY_MULTIPLIER: f32 = 0.05;
+    const DISPLAY_PRECISION: usize = 2;
+    fn label(&self) -> &'static str {
+        "Temperature (°C)"
+    }
+}
+
+impl Metadata for HumidityData {
+    const DISPLAY_MULTIPLIER: f32 = 1.0;
+    const DISPLAY_PRECISION: usize = 0;
+    fn label(&self) -> &'static str {
+        "Humidity (%)"
+    }
+}
+
+impl Metadata for PressureData {
+    const DISPLAY_MULTIPLIER: f32 = 0.1;
+    const DISPLAY_PRECISION: usize = 1;
+    fn label(&self) -> &'static str {
+        "Pressure (mbar)"
+    }
+}
+
+impl Metadata for CO2Data {
+    const DISPLAY_MULTIPLIER: f32 = 1.0;
+    const DISPLAY_PRECISION: usize = 0;
+    fn label(&self) -> &'static str {
+        "CO₂ (ppm)"
+    }
+}
+
+impl<const T: u8> TryFrom<&[u8]> for SensorData<u16, T> {
     type Error = Aranet4Error;
-
-    fn try_from(n: u8) -> Result<Self, Self::Error> {
-        match n {
-            1 => Ok(DataType::Temperature),
-            2 => Ok(DataType::Humidity),
-            3 => Ok(DataType::Pressure),
-            4 => Ok(DataType::CO2),
-            _ => Err(Aranet4Error::InvalidResponse(
-                "Unknown data type".to_string(),
-            )),
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() % 2 == 0 {
+            Ok(Self {
+                values: bytes
+                    .chunks_exact(2)
+                    .map(|x| u16::from_le_bytes([x[0], x[1]]))
+                    .collect(),
+            })
+        } else {
+            Err(Aranet4Error::InvalidResponse(
+                "expected an even number of bytes".to_string(),
+            ))
         }
     }
 }
 
-impl DataType {
-    const fn label(self) -> &'static str {
-        match self {
-            DataType::Temperature => "Temperature (°C)",
-            DataType::Humidity => "Humidity (%)",
-            DataType::Pressure => "Pressure (mbar)",
-            DataType::CO2 => "CO₂ (ppm)",
-        }
+impl<const T: u8> TryFrom<&[u8]> for SensorData<u8, T> {
+    type Error = Aranet4Error;
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self {
+            values: bytes.to_vec(),
+        })
     }
-    const fn multiplier(self) -> f32 {
-        match self {
-            DataType::Temperature => 0.05,
-            DataType::Humidity => 1.0,
-            DataType::Pressure => 0.1,
-            DataType::CO2 => 1.0,
-        }
-    }
+}
 
-    const fn bytes_per_elem(self) -> usize {
-        match self {
-            DataType::Temperature => 2,
-            DataType::Humidity => 1,
-            DataType::Pressure => 2,
-            DataType::CO2 => 2,
+impl<Storage, const SENSORTYPE: u8> fmt::Display for SensorData<Storage, SENSORTYPE>
+where
+    f32: From<Storage>,
+    SensorData<Storage, SENSORTYPE>: Metadata,
+    Storage: Copy,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut result = write!(f, "[");
+        if !self.values.is_empty() {
+            result = result.and(write!(
+                f,
+                "{:.*}",
+                Self::DISPLAY_PRECISION,
+                f32::from(self.values[0]) * Self::DISPLAY_MULTIPLIER
+            ));
         }
-    }
-
-    const fn display_precision(self) -> usize {
-        match self {
-            DataType::Temperature => 2,
-            DataType::Humidity => 0,
-            DataType::Pressure => 1,
-            DataType::CO2 => 0,
+        if self.values.len() > 1 {
+            self.values[1..].iter().for_each(|x| {
+                result = result.and(write!(
+                    f,
+                    ", {:.*}",
+                    Self::DISPLAY_PRECISION,
+                    f32::from(*x) * Self::DISPLAY_MULTIPLIER
+                ));
+            });
         }
+        result.and(write!(f, "]"))
     }
 }
 
@@ -124,14 +175,14 @@ impl fmt::Display for CurrentSensorMeasurement {
         write!(
             f,
             "CO₂: {:.*} ppm\nT: {:.*}°C\nP: {:.*} mbar\nHumidity: {:.*}%\nBattery: {}%\nStatus: {}\nInterval: {} s\nAgo: {} s\n",
-            DataType::CO2.display_precision(),
-            (self.co2 as f32) * DataType::CO2.multiplier(),
-            DataType::Temperature.display_precision(),
-            (self.temperature as f32) * DataType::Temperature.multiplier(),
-            DataType::Pressure.display_precision(),
-            (self.pressure as f32) * DataType::Pressure.multiplier(),
-            DataType::Humidity.display_precision(),
-            (self.humidity as f32) * DataType::Humidity.multiplier(),
+            CO2Data::DISPLAY_PRECISION,
+            (self.co2 as f32) * CO2Data::DISPLAY_MULTIPLIER,
+            TemperatureData::DISPLAY_PRECISION,
+            (self.temperature as f32) * TemperatureData::DISPLAY_MULTIPLIER,
+            PressureData::DISPLAY_PRECISION,
+            (self.pressure as f32) * PressureData::DISPLAY_MULTIPLIER,
+            HumidityData::DISPLAY_PRECISION,
+            (self.humidity as f32) * HumidityData::DISPLAY_MULTIPLIER,
             self.battery,
             self.status,
             self.interval,
@@ -142,20 +193,18 @@ impl fmt::Display for CurrentSensorMeasurement {
 
 #[derive(Debug)]
 struct HistoryResponseHeader {
-    history_type: DataType,
+    type_code: u8,
     start_index: u16,
     packet_num_elem: u8,
 }
 
-impl TryFrom<&[u8]> for HistoryResponseHeader {
-    type Error = Aranet4Error;
-
-    fn try_from(item: &[u8]) -> Result<Self, Self::Error> {
-        Ok(HistoryResponseHeader {
-            history_type: DataType::try_from(item[0])?,
+impl From<[u8; 4]> for HistoryResponseHeader {
+    fn from(item: [u8; 4]) -> Self {
+        HistoryResponseHeader {
+            type_code: item[0],
             start_index: u16::from_le_bytes([item[1], item[2]]),
             packet_num_elem: item[3],
-        })
+        }
     }
 }
 
@@ -164,9 +213,7 @@ impl fmt::Display for HistoryResponseHeader {
         write!(
             f,
             "history_type: {}\nstart_index: {}\npacket_num_elem: {}",
-            self.history_type.label(),
-            self.start_index,
-            self.packet_num_elem
+            self.type_code, self.start_index, self.packet_num_elem,
         )
     }
 }
@@ -175,36 +222,27 @@ pub fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorM
     println!(
         "{}\n{}\n{}",
         sensor_name,
-        "=".repeat(sensor_name.len()),
+        "=".repeat(sensor_name.graphemes(true).count()),
         measurement
     );
 }
 
-pub fn print_history<T>(data_type: DataType, data: &[T])
+pub fn print_history<T, const S: u8>(data: SensorData<T, S>)
 where
-    f32: std::convert::From<T>,
+    f32: From<T>,
+    SensorData<T, S>: Metadata,
     T: Copy,
 {
-    let label = data_type.label();
-    let multiplier = data_type.multiplier();
-    let precision = data_type.display_precision();
-    print!(
-        "{}\n{}\n[",
+    let label = data.label();
+    println!(
+        "{}\n{}\n{}",
         label,
-        "=".repeat(label.graphemes(true).count())
+        "=".repeat(label.graphemes(true).count()),
+        data,
     );
-    if !data.is_empty() {
-        print!("{:.*}", precision, Into::<f32>::into(data[0]) * multiplier)
-    }
-    if data.len() > 1 {
-        data[1..]
-            .iter()
-            .for_each(|x| print!(", {:.*}", precision, Into::<f32>::into(*x) * multiplier));
-    }
-    println!("]")
 }
 
-fn bytes_to_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {
+fn bytes_to_single_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {
     if bytes.len() == 2 {
         Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
     } else {
@@ -217,19 +255,19 @@ fn bytes_to_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {
 async fn get_total_readings(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
     let char = get_characteristic(sensor, ARANET4_TOTAL_READINGS_UUID)?;
     let bytes = sensor.read(&char).await?;
-    bytes_to_u16(&bytes)
+    bytes_to_single_u16(&bytes)
 }
 
 async fn get_time_since_update(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
     let char = get_characteristic(sensor, ARANET4_TIME_SINCE_UPDATE_UUID)?;
     let bytes = sensor.read(&char).await?;
-    bytes_to_u16(&bytes)
+    bytes_to_single_u16(&bytes)
 }
 
 async fn get_update_interval(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
     let char = get_characteristic(sensor, ARANET4_UPDATE_INTERVAL_UUID)?;
     let bytes = sensor.read(&char).await?;
-    bytes_to_u16(&bytes)
+    bytes_to_single_u16(&bytes)
 }
 
 pub async fn get_current_sensor_data(
@@ -273,10 +311,12 @@ fn get_characteristic(
         .ok_or(Aranet4Error::CharacteristicNotFound)
 }
 
-pub async fn get_history_bytes(
+pub async fn get_history<T, const SENSORTYPE: u8>(
     sensor: &Peripheral,
-    data_type: DataType,
-) -> Result<Vec<u8>, Aranet4Error> {
+) -> Result<SensorData<T, SENSORTYPE>, Aranet4Error>
+where
+    SensorData<T, SENSORTYPE>: Metadata + for<'a> TryFrom<&'a [u8], Error = Aranet4Error>,
+{
     // connect to the device
     sensor.connect().await?;
 
@@ -295,7 +335,7 @@ pub async fn get_history_bytes(
     let total_readings = get_total_readings(sensor).await?;
     let get_history_command_bytes: &[u8] = &[
         0x82,
-        data_type as u8,
+        SENSORTYPE,
         0x00,
         0x00,
         0x01,
@@ -314,7 +354,7 @@ pub async fn get_history_bytes(
     sensor.subscribe(&subscribe_char).await?;
 
     // Now get that sweet, sweet data
-    let bytes_per_elem = data_type.bytes_per_elem();
+    let bytes_per_elem = size_of::<T>();
     let mut notification_stream = sensor.notifications().await?;
     let mut history_bytes = Vec::new();
     while let Some(data) = notification_stream.next().await {
@@ -323,12 +363,18 @@ pub async fn get_history_bytes(
                 "Expected notification UUID to match ARANET4_NOTIFY_HISTORY_UUID".to_string(),
             ));
         }
-        let header = HistoryResponseHeader::try_from(&data.value[..4])?;
-        if header.history_type != data_type {
+        if data.value.len() < 4 {
+            return Err(Aranet4Error::InvalidResponse(
+                "Expected at least 4 bytes for the header".to_string(),
+            ));
+        }
+        let header_bytes: [u8; 4] = data.value[..4].try_into().unwrap();
+        if header_bytes[0] != SENSORTYPE {
             return Err(Aranet4Error::InvalidResponse(
                 "History type doesn't match what we requested".to_string(),
             ));
         }
+        let header = HistoryResponseHeader::from(header_bytes);
         let bytes_end = 4 + bytes_per_elem * (header.packet_num_elem as usize);
         history_bytes.extend_from_slice(&data.value[4..bytes_end]);
         if history_bytes.len() >= bytes_per_elem * (total_readings as usize) {
@@ -341,21 +387,25 @@ pub async fn get_history_bytes(
             "Received unexpected number of bytes".to_string(),
         ));
     }
-    Ok(history_bytes)
+
+    let history_data = history_bytes[..].try_into()?;
+    Ok(history_data)
 }
 
-pub async fn get_history_u16(
-    sensor: &Peripheral,
-    data_type: DataType,
-) -> Result<Vec<u16>, Aranet4Error> {
-    let history_bytes = get_history_bytes(sensor, data_type).await?;
+pub async fn get_temperature_history(sensor: &Peripheral) -> Result<TemperatureData, Aranet4Error> {
+    get_history(sensor).await
+}
 
-    // Convert u8 to u16
-    let history_data = history_bytes
-        .chunks_exact(2)
-        .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
-        .collect();
-    Ok(history_data)
+pub async fn get_humidity_history(sensor: &Peripheral) -> Result<HumidityData, Aranet4Error> {
+    get_history(sensor).await
+}
+
+pub async fn get_pressure_history(sensor: &Peripheral) -> Result<PressureData, Aranet4Error> {
+    get_history(sensor).await
+}
+
+pub async fn get_co2_history(sensor: &Peripheral) -> Result<CO2Data, Aranet4Error> {
+    get_history(sensor).await
 }
 
 fn estimate_history_start_time(

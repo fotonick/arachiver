@@ -16,20 +16,20 @@ async fn process_sensor(sensor: &Peripheral) {
         "Computed start time = {}",
         get_history_start_time(sensor).await.unwrap()
     );
-    match get_history_u16(sensor, DataType::Temperature).await {
-        Ok(data) => print_history(DataType::Temperature, &data),
+    match get_temperature_history(sensor).await {
+        Ok(data) => print_history(data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    match get_history_bytes(sensor, DataType::Humidity).await {
-        Ok(data) => print_history(DataType::Humidity, &data),
+    match get_humidity_history(sensor).await {
+        Ok(data) => print_history(data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    match get_history_u16(sensor, DataType::Pressure).await {
-        Ok(data) => print_history(DataType::Pressure, &data),
+    match get_pressure_history(sensor).await {
+        Ok(data) => print_history(data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
-    match get_history_u16(sensor, DataType::CO2).await {
-        Ok(data) => print_history(DataType::CO2, &data),
+    match get_co2_history(sensor).await {
+        Ok(data) => print_history(data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
 }
