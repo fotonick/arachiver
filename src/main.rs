@@ -6,6 +6,7 @@ use futures::future::join_all;
 
 mod device;
 use crate::device::*;
+mod types;
 
 async fn process_sensor(sensor: &Peripheral) {
     match get_current_sensor_data(sensor).await {
