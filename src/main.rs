@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Error as AnyhowError};
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Manager, Peripheral};
 use chrono::Duration;
+use color_eyre::eyre::{eyre, Error};
 use futures::future::join_all;
 
 mod device;
@@ -36,7 +36,8 @@ async fn process_sensor(sensor: &Peripheral) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), AnyhowError> {
+async fn main() -> Result<(), Error> {
+    color_eyre::install()?;
     let manager = Manager::new().await.unwrap();
 
     // get the first bluetooth adapter
@@ -57,7 +58,7 @@ async fn main() -> Result<(), AnyhowError> {
     // query devices concurrently
     let peripherals = central.peripherals().await.unwrap();
     if peripherals.is_empty() {
-        return Err(anyhow!("No devices found"));
+        return Err(eyre!("No devices found"));
     }
     let mut tasks = Vec::new();
     for peripheral in peripherals {
