@@ -120,7 +120,14 @@ where
     Storage: Copy,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut result = write!(f, "[");
+        let label = self.label();
+        let mut result = write!(
+            f,
+            "{}\n{}\n",
+            label,
+            "=".repeat(label.graphemes(true).count())
+        );
+        result = result.and(write!(f, "["));
         if !self.values.is_empty() {
             result = result.and(write!(
                 f,
@@ -227,21 +234,6 @@ pub fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorM
     );
 }
 
-pub fn print_history<T, const S: u8>(data: SensorData<T, S>)
-where
-    f32: From<T>,
-    SensorData<T, S>: Metadata,
-    T: Copy,
-{
-    let label = data.label();
-    println!(
-        "{}\n{}\n{}",
-        label,
-        "=".repeat(label.graphemes(true).count()),
-        data,
-    );
-}
-
 fn bytes_to_single_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {
     if bytes.len() == 2 {
         Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
@@ -311,7 +303,7 @@ fn get_characteristic(
         .ok_or(Aranet4Error::CharacteristicNotFound)
 }
 
-pub async fn get_history<T, const SENSORTYPE: u8>(
+async fn get_history<T, const SENSORTYPE: u8>(
     sensor: &Peripheral,
 ) -> Result<SensorData<T, SENSORTYPE>, Aranet4Error>
 where

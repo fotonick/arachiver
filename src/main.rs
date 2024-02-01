@@ -17,19 +17,19 @@ async fn process_sensor(sensor: &Peripheral) {
         get_history_start_time(sensor).await.unwrap()
     );
     match get_temperature_history(sensor).await {
-        Ok(data) => print_history(data),
+        Ok(data) => println!("{}", data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
     match get_humidity_history(sensor).await {
-        Ok(data) => print_history(data),
+        Ok(data) => println!("{}", data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
     match get_pressure_history(sensor).await {
-        Ok(data) => print_history(data),
+        Ok(data) => println!("{}", data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
     match get_co2_history(sensor).await {
-        Ok(data) => print_history(data),
+        Ok(data) => println!("{}", data),
         Err(e) => eprintln!("Oh no: {}", e),
     };
 }
