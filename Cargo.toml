@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-btleplug = "0.11.3"
-chrono = "0.4.33"
-color-eyre = "0.6.2"
+btleplug = "0.11.5"
+chrono = "0.4.38"
+color-eyre = "0.6.3"
 futures = "0.3.30"
 futures-util = "0.3.30"
-thiserror = "1.0.56"
-tokio = { version = "1.35.1", features = [ "time", "rt-multi-thread", "macros" ] }
-unicode-segmentation = "1.10.1"
-uuid = "1.6.1"
+thiserror = "1.0.61"
+tokio = { version = "1.37.0", features = [ "time", "rt-multi-thread", "macros" ] }
+unicode-segmentation = "1.11.0"
+uuid = "1.8.0"
