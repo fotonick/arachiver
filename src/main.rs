@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::Write;
+use std::time::Duration;
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Manager, Peripheral};
-use chrono::{Duration, Local};
-use color_eyre::eyre::{eyre, Error};
+use chrono::Local;
+use color_eyre::eyre::{eyre, Error, Result};
 use futures::future::join_all;
 
 mod device;
@@ -75,6 +76,16 @@ async fn save_history_csv<W: Write>(sensor: &Peripheral, dest: &mut W) {
 //         Err(e) => eprintln!("Oh no: {}", e),
 //     };
 // }
+async fn disconnect_all(peripherals: &[Peripheral]) {
+    let mut tasks = Vec::new();
+    for peripheral in peripherals {
+        tasks.push(tokio::time::timeout(
+            Duration::from_millis(1000),
+            peripheral.disconnect(),
+        ));
+    }
+    join_all(tasks).await;
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -91,10 +102,9 @@ async fn main() -> Result<(), Error> {
             services: vec![ARANET4_SERVICE_UUID],
         })
         .await?;
-    // central.start_scan(ScanFilter::default()).await?;
     // instead of waiting, you can use central.events() to get a stream which will
     // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
-    tokio::time::sleep(Duration::seconds(3).to_std().unwrap()).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // query devices concurrently
     let peripherals = central.peripherals().await.unwrap();
@@ -102,8 +112,8 @@ async fn main() -> Result<(), Error> {
         return Err(eyre!("No devices found"));
     }
     let mut tasks = Vec::new();
-    for peripheral in peripherals {
-        // tokio::time::timeout(Duration::from_millis(1000), peripheral.disconnect()).await?;
+    for peripheral in &peripherals {
+        let peripheral = peripheral.clone();
         let local_name = peripheral
             .properties()
             .await
@@ -128,10 +138,11 @@ async fn main() -> Result<(), Error> {
             tasks.push(tokio::spawn(async move {
                 save_history_csv(&peripheral, &mut output_file).await
             }));
+            println!("Wrote {}", output_filename);
         }
     }
     join_all(tasks).await;
-
+    disconnect_all(&peripherals).await;
     central.stop_scan().await.unwrap();
     Ok(())
 }
