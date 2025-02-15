@@ -90,6 +90,42 @@ async fn disconnect_all(peripherals: &[Peripheral]) {
     join_all(tasks).await;
 }
 
+async fn get_local_name(peripheral: &Peripheral) -> Option<String> {
+    peripheral
+        .properties()
+        .await
+        .expect("expect property result")
+        .expect("expect some properties")
+        .local_name
+}
+
+async fn save_history_csv_all(peripherals: &[Peripheral]) {
+    let mut tasks = Vec::new();
+    for peripheral in peripherals {
+        let peripheral = peripheral.clone();
+        let Some(local_name) = get_local_name(&peripheral).await else {
+            continue;
+        };
+        if local_name.contains("Aranet4") {
+            let now = Local::now();
+            let output_filename = format!(
+                "{}_{}_history.csv",
+                now.to_rfc3339(),
+                local_name.replace(" ", "_")
+            );
+            let mut output_file = File::create(&output_filename).expect(&format!(
+                "Could not create writeable file {}",
+                &output_filename
+            ));
+            tasks.push(tokio::spawn(async move {
+                save_history_csv(&peripheral, &mut output_file).await
+            }));
+            println!("Wrote {}", output_filename);
+        }
+    }
+    join_all(tasks).await;
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     color_eyre::install()?;
@@ -114,37 +150,7 @@ async fn main() -> Result<(), Error> {
     if peripherals.is_empty() {
         return Err(eyre!("No devices found"));
     }
-    let mut tasks = Vec::new();
-    for peripheral in &peripherals {
-        let peripheral = peripheral.clone();
-        let local_name = peripheral
-            .properties()
-            .await
-            .expect("expect property result")
-            .expect("expect some properties")
-            .local_name;
-        let local_name = match local_name {
-            None => continue,
-            Some(local_name) => local_name,
-        };
-        if local_name.contains("Aranet4") {
-            let now = Local::now();
-            let output_filename = format!(
-                "{}_{}_history.csv",
-                now.to_rfc3339(),
-                local_name.replace(" ", "_")
-            );
-            let mut output_file = File::create(&output_filename).expect(&format!(
-                "Could not create writeable file {}",
-                &output_filename
-            ));
-            tasks.push(tokio::spawn(async move {
-                save_history_csv(&peripheral, &mut output_file).await
-            }));
-            println!("Wrote {}", output_filename);
-        }
-    }
-    join_all(tasks).await;
+    save_history_csv_all(&peripherals).await;
     disconnect_all(&peripherals).await;
     central.stop_scan().await.unwrap();
     Ok(())
