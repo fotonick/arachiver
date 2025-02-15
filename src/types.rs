@@ -97,6 +97,20 @@ impl<const T: u8> TryFrom<&[u8]> for SensorData<u8, T> {
     }
 }
 
+impl<Storage, const SENSORTYPE: u8> SensorData<Storage, SENSORTYPE>
+where
+    f32: From<Storage>,
+    SensorData<Storage, SENSORTYPE>: Metadata,
+    Storage: Copy,
+{
+    pub fn get_float_value(&self, i: usize) -> String {
+        format!(
+            "{:.*}",
+            Self::DISPLAY_PRECISION,
+            f32::from(self.values[i]) * Self::DISPLAY_MULTIPLIER
+        )
+    }
+}
 impl<Storage, const SENSORTYPE: u8> fmt::Display for SensorData<Storage, SENSORTYPE>
 where
     f32: From<Storage>,
