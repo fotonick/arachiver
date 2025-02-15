@@ -11,8 +11,8 @@ use futures::future::join_all;
 mod device;
 mod types;
 use crate::device::{
-    get_co2_history, get_humidity_history, get_pressure_history, get_temperature_history,
-    ARANET4_SERVICE_UUID,
+    get_co2_history, get_current_sensor_data, get_history_start_time, get_humidity_history,
+    get_pressure_history, get_temperature_history, print_current_sensor_data, ARANET4_SERVICE_UUID,
 };
 use crate::types::Metadata;
 
@@ -50,32 +50,35 @@ async fn save_history_csv<W: Write>(sensor: &Peripheral, dest: &mut W) {
         ));
     }
 }
-// async fn process_sensor(sensor: &Peripheral) {
-//     match get_current_sensor_data(sensor).await {
-//         Ok((local_name, data)) => print_current_sensor_data(&local_name, &data),
-//         Err(e) => eprintln!("Oh no: {}", e),
-//     };
-//     println!(
-//         "Computed start time = {}",
-//         get_history_start_time(sensor).await.unwrap()
-//     );
-//     match get_temperature_history(sensor).await {
-//         Ok(data) => println!("{}", data),
-//         Err(e) => eprintln!("Oh no: {}", e),
-//     };
-//     match get_humidity_history(sensor).await {
-//         Ok(data) => println!("{}", data),
-//         Err(e) => eprintln!("Oh no: {}", e),
-//     };
-//     match get_pressure_history(sensor).await {
-//         Ok(data) => println!("{}", data),
-//         Err(e) => eprintln!("Oh no: {}", e),
-//     };
-//     match get_co2_history(sensor).await {
-//         Ok(data) => println!("{}", data),
-//         Err(e) => eprintln!("Oh no: {}", e),
-//     };
-// }
+
+#[allow(dead_code)]
+async fn process_sensor(sensor: &Peripheral) {
+    match get_current_sensor_data(sensor).await {
+        Ok((local_name, data)) => print_current_sensor_data(&local_name, &data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    println!(
+        "Computed start time = {}",
+        get_history_start_time(sensor).await.unwrap()
+    );
+    match get_temperature_history(sensor).await {
+        Ok(data) => println!("{}", data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_humidity_history(sensor).await {
+        Ok(data) => println!("{}", data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_pressure_history(sensor).await {
+        Ok(data) => println!("{}", data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+    match get_co2_history(sensor).await {
+        Ok(data) => println!("{}", data),
+        Err(e) => eprintln!("Oh no: {}", e),
+    };
+}
+
 async fn disconnect_all(peripherals: &[Peripheral]) {
     let mut tasks = Vec::new();
     for peripheral in peripherals {
