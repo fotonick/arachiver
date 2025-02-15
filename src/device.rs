@@ -3,6 +3,7 @@ use btleplug::{
     platform::Peripheral,
 };
 use chrono::{DateTime, Duration, Utc};
+use color_eyre::{eyre::eyre, Result};
 use futures::StreamExt;
 use std::mem::size_of;
 use unicode_segmentation::UnicodeSegmentation;
@@ -193,27 +194,37 @@ pub async fn get_co2_history(sensor: &Peripheral) -> Result<CO2Data, Aranet4Erro
     get_history(sensor).await
 }
 
-fn estimate_history_start_time(
-    now: DateTime<Utc>,
-    num_samples: u16,
+#[derive(Debug)]
+pub struct HistoryTime {
+    num_samples: usize,
     update_interval: u16,
     since_update: u16,
-) -> DateTime<Utc> {
-    now - Duration::seconds(
-        (num_samples as i64 - 1) * (update_interval as i64) + (since_update as i64),
-    )
+    now: DateTime<Utc>,
 }
 
-pub async fn get_history_start_time(sensor: &Peripheral) -> Result<DateTime<Utc>, Aranet4Error> {
-    sensor.connect().await?;
-    let num_samples = get_total_readings(sensor).await?;
-    let update_interval = get_update_interval(sensor).await?;
-    let since_update = get_time_since_update(sensor).await?;
-    let now: DateTime<Utc> = Utc::now();
-    Ok(estimate_history_start_time(
-        now,
-        num_samples,
-        update_interval,
-        since_update,
-    ))
+impl HistoryTime {
+    pub async fn from_sensor(sensor: &Peripheral, num_samples: usize) -> Result<Self> {
+        Ok(HistoryTime {
+            num_samples,
+            update_interval: get_update_interval(sensor).await?,
+            since_update: get_time_since_update(sensor).await?,
+            now: Utc::now(),
+        })
+    }
+
+    pub fn get_timestamp(&self, sample: usize) -> Result<i64> {
+        if sample >= self.num_samples {
+            return Err(eyre!(
+                "Invalid sample index {} (# samples = {})",
+                sample,
+                self.num_samples
+            ));
+        }
+        let time = self.now
+            - Duration::seconds(
+                (self.num_samples as i64 - sample as i64 - 1) * (self.update_interval as i64)
+                    + (self.since_update as i64),
+            );
+        Ok(time.timestamp())
+    }
 }
