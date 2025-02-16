@@ -2,10 +2,11 @@ use btleplug::{
     api::{bleuuid::uuid_from_u16, CharPropFlags, Characteristic, Peripheral as _, WriteType},
     platform::Peripheral,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use color_eyre::{eyre::eyre, Result};
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
 use std::mem::size_of;
+use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
@@ -221,10 +222,30 @@ impl HistoryTime {
             ));
         }
         let time = self.now
-            - Duration::seconds(
+            - TimeDelta::seconds(
                 (self.num_samples as i64 - sample as i64 - 1) * (self.update_interval as i64)
                     + (self.since_update as i64),
             );
         Ok(time.timestamp())
     }
+}
+
+pub async fn disconnect_all(peripherals: &[Peripheral]) {
+    let mut tasks = Vec::new();
+    for peripheral in peripherals {
+        tasks.push(tokio::time::timeout(
+            Duration::from_millis(1000),
+            peripheral.disconnect(),
+        ));
+    }
+    join_all(tasks).await;
+}
+
+pub async fn get_local_name(peripheral: &Peripheral) -> Option<String> {
+    peripheral
+        .properties()
+        .await
+        .expect("expect property result")
+        .expect("expect some properties")
+        .local_name
 }
