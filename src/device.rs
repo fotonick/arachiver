@@ -4,9 +4,9 @@ use btleplug::{
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use color_eyre::{eyre::eyre, Result};
-use futures::{future::join_all, StreamExt};
+use futures::{stream, StreamExt};
 use std::mem::size_of;
-use std::time::Duration;
+use std::pin::pin;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
@@ -60,13 +60,7 @@ async fn get_update_interval(sensor: &Peripheral) -> Result<u16, Aranet4Error> {
 pub async fn get_current_sensor_data(
     sensor: &Peripheral,
 ) -> Result<(String, CurrentSensorMeasurement), Aranet4Error> {
-    let local_name = sensor
-        .properties()
-        .await
-        .expect("expect property result")
-        .expect("expect some properties")
-        .local_name
-        .unwrap();
+    let local_name = get_local_name(sensor).await.unwrap();
 
     // connect to the device
     sensor.connect().await?;
@@ -98,7 +92,7 @@ fn get_characteristic(
         .ok_or(Aranet4Error::CharacteristicNotFound)
 }
 
-async fn get_history<T, const SENSORTYPE: u8>(
+async fn get_single_history_type<T, const SENSORTYPE: u8>(
     sensor: &Peripheral,
 ) -> Result<SensorData<T, SENSORTYPE>, Aranet4Error>
 where
@@ -180,19 +174,19 @@ where
 }
 
 pub async fn get_temperature_history(sensor: &Peripheral) -> Result<TemperatureData, Aranet4Error> {
-    get_history(sensor).await
+    get_single_history_type(sensor).await
 }
 
 pub async fn get_humidity_history(sensor: &Peripheral) -> Result<HumidityData, Aranet4Error> {
-    get_history(sensor).await
+    get_single_history_type(sensor).await
 }
 
 pub async fn get_pressure_history(sensor: &Peripheral) -> Result<PressureData, Aranet4Error> {
-    get_history(sensor).await
+    get_single_history_type(sensor).await
 }
 
 pub async fn get_co2_history(sensor: &Peripheral) -> Result<CO2Data, Aranet4Error> {
-    get_history(sensor).await
+    get_single_history_type(sensor).await
 }
 
 #[derive(Debug)]
@@ -230,17 +224,6 @@ impl HistoryTime {
     }
 }
 
-pub async fn disconnect_all(peripherals: &[Peripheral]) {
-    let mut tasks = Vec::new();
-    for peripheral in peripherals {
-        tasks.push(tokio::time::timeout(
-            Duration::from_millis(1000),
-            peripheral.disconnect(),
-        ));
-    }
-    join_all(tasks).await;
-}
-
 pub async fn get_local_name(peripheral: &Peripheral) -> Option<String> {
     peripheral
         .properties()
@@ -248,4 +231,45 @@ pub async fn get_local_name(peripheral: &Peripheral) -> Option<String> {
         .expect("expect property result")
         .expect("expect some properties")
         .local_name
+}
+
+pub async fn find_peripheral(peripherals: &[Peripheral], name: &str) -> Option<Peripheral> {
+    pin!(stream::iter(peripherals).filter_map(|p| {
+        async move {
+            if let Some(local_name) = get_local_name(&p).await {
+                if local_name.contains(name) {
+                    Some(p.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }))
+    .next()
+    .await
+}
+
+pub async fn get_history(
+    sensor: &Peripheral,
+) -> Result<(
+    HistoryTime,
+    TemperatureData,
+    HumidityData,
+    PressureData,
+    CO2Data,
+)> {
+    // Await each one sequentially because while we could do two separate devices in
+    // parallel, there's no speedup to be had by multiply querying a single device and
+    // it would probably confuse the device.
+    let temperature = get_temperature_history(sensor).await?;
+    let humidity = get_humidity_history(sensor).await?;
+    let pressure = get_pressure_history(sensor).await?;
+    let co2 = get_co2_history(sensor).await?;
+    assert_eq!(temperature.values.len(), humidity.values.len());
+    assert_eq!(temperature.values.len(), pressure.values.len());
+    assert_eq!(temperature.values.len(), co2.values.len());
+    let history_time = HistoryTime::from_sensor(sensor, temperature.values.len()).await?;
+    Ok((history_time, temperature, humidity, pressure, co2))
 }
