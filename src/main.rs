@@ -22,7 +22,9 @@ fn cli() -> Command {
         .about("Aranet4 archiver")
         .subcommand_required(true)
         .arg_required_else_help(true)
-        .subcommand(Command::new("readout").about("Read out the current state"))
+        .subcommand(
+            Command::new("readout").about("Read out the current state and print it to stdout"),
+        )
         .subcommand(Command::new("archive_history_csv").about("Read out the full history to CSV"))
 }
 
