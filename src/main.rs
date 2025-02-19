@@ -40,11 +40,13 @@ async fn process_sensor(sensor: &Peripheral) {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     color_eyre::install()?;
-    let manager = Manager::new().await.unwrap();
 
     // get the first bluetooth adapter
-    let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().next().unwrap();
+    let central = {
+        let manager = Manager::new().await.unwrap();
+        let adapters = manager.adapters().await?;
+        adapters.into_iter().next().unwrap()
+    };
 
     // start scanning for devices
     central
@@ -52,7 +54,9 @@ async fn main() -> Result<(), Error> {
             services: vec![ARANET4_SERVICE_UUID],
         })
         .await?;
-    // instead of waiting, you can use central.events() to get a stream which will
+
+    // Only look for devices for 3 seconds.
+    // NB: Instead of waiting with a hard timeout, you can use central.events() to get a stream which will
     // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
     tokio::time::sleep(Duration::from_secs(3)).await;
 
