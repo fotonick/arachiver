@@ -1,6 +1,7 @@
 use std::io::Write;
 
 use color_eyre::eyre::Result;
+use csv;
 
 use crate::device::HistoryTime;
 use crate::types::{CO2Data, HumidityData, Metadata, PressureData, TemperatureData};
