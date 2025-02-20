@@ -191,10 +191,10 @@ pub async fn get_co2_history(sensor: &Peripheral) -> Result<CO2Data, Aranet4Erro
 
 #[derive(Debug)]
 pub struct HistoryTime {
-    num_samples: usize,
-    update_interval: u16,
-    since_update: u16,
-    now: DateTime<Utc>,
+    pub num_samples: usize,
+    pub update_interval: u16,
+    pub since_update: u16,
+    pub now: DateTime<Utc>,
 }
 
 impl HistoryTime {
@@ -221,6 +221,12 @@ impl HistoryTime {
                     + (self.since_update as i64),
             );
         Ok(time.timestamp())
+    }
+
+    pub fn to_vec(&self) -> Vec<i64> {
+        (0..self.num_samples)
+            .map(|i| self.get_timestamp(i).unwrap())
+            .collect()
     }
 }
 

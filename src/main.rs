@@ -10,12 +10,14 @@ use color_eyre::eyre::{eyre, Error, Result};
 
 mod csv_io;
 mod device;
+mod parquet_io;
 mod types;
 use crate::csv_io::save_history_csv;
 use crate::device::{
     find_peripheral, get_current_sensor_data, get_history, get_local_name,
     print_current_sensor_data, ARANET4_SERVICE_UUID,
 };
+use crate::parquet_io::save_history_parquet;
 
 fn cli() -> Command {
     Command::new("arachiver")
@@ -33,6 +35,9 @@ fn cli() -> Command {
             Command::new("readout").about("Read out the current state and print it to stdout"),
         )
         .subcommand(Command::new("archive_history_csv").about("Read out the full history to CSV"))
+        .subcommand(
+            Command::new("archive_history_parquet").about("Read out the full history to Parquet"),
+        )
 }
 
 pub async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
@@ -49,6 +54,23 @@ pub async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
     ));
     let (ht, t, h, p, c) = get_history(&peripheral).await?;
     save_history_csv(ht, t, h, p, c, &mut output_file).await?;
+    Ok(output_filename)
+}
+
+pub async fn archive_history_parquet(peripheral: &Peripheral) -> Result<String> {
+    let local_name = get_local_name(&peripheral).await.unwrap(); // must be Ok to be found
+    let now = Local::now();
+    let output_filename = format!(
+        "{}_{}_history.parquet",
+        now.to_rfc3339(),
+        local_name.replace(" ", "_")
+    );
+    let mut output_file = File::create(&output_filename).expect(&format!(
+        "Could not create writeable file {}",
+        &output_filename
+    ));
+    let (ht, t, h, p, c) = get_history(&peripheral).await?;
+    save_history_parquet(ht, t, h, p, c, &mut output_file).await?;
     Ok(output_filename)
 }
 
@@ -95,6 +117,10 @@ async fn main() -> Result<(), Error> {
         }
         Some(("archive_history_csv", _sub_matches)) => {
             let fname = archive_history_csv(&sensor).await?;
+            println!("Wrote {}", fname);
+        }
+        Some(("archive_history_parquet", _sub_matches)) => {
+            let fname = archive_history_parquet(&sensor).await?;
             println!("Wrote {}", fname);
         }
         _ => {

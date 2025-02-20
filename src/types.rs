@@ -103,12 +103,16 @@ where
     SensorData<Storage, SENSORTYPE>: Metadata,
     Storage: Copy,
 {
-    pub fn get_float_value(&self, i: usize) -> String {
+    pub fn get_value_string(&self, i: usize) -> String {
         format!(
             "{:.*}",
             Self::DISPLAY_PRECISION,
             f32::from(self.values[i]) * Self::DISPLAY_MULTIPLIER
         )
+    }
+
+    pub fn get_f32_value(&self, i: usize) -> f32 {
+        f32::from(self.values[i]) * Self::DISPLAY_MULTIPLIER
     }
 }
 impl<Storage, const SENSORTYPE: u8> fmt::Display for SensorData<Storage, SENSORTYPE>

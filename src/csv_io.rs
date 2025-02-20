@@ -26,10 +26,10 @@ pub async fn save_history_csv<W: Write>(
     for i in 0..temperature.values.len() {
         dest.write_record([
             history_time.get_timestamp(i)?.to_string(),
-            temperature.get_float_value(i).to_string(),
-            humidity.get_float_value(i).to_string(),
-            pressure.get_float_value(i).to_string(),
-            co2.get_float_value(i).to_string(),
+            temperature.get_value_string(i),
+            humidity.get_value_string(i),
+            pressure.get_value_string(i),
+            co2.get_value_string(i),
         ])
         .expect(&format!(
             "Failed while writing CSV row {} (data record {})",
