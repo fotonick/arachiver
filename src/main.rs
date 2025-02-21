@@ -28,7 +28,7 @@ fn cli() -> Command {
                 .long("device")
                 .default_value("Aranet")
                 .required(false)
-                .help("Select an Aranet4 device with <device_pattern> in its name"),
+                .help("Select an Aranet4 device with <device_pattern> in its name; by default, the first device with 'Aranet' in its name will be used"),
         )
         .subcommand(Command::new("device_info").about("Print device information"))
         .subcommand(Command::new("readout").about("Print the current sensor readings to stdout"))
