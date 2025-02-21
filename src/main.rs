@@ -25,19 +25,18 @@ fn cli() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .arg(
-            Arg::new("device")
+            Arg::new("device_pattern")
                 .short('d')
-                .long("select-device")
+                .long("device")
                 .default_value("Aranet")
-                .required(false),
+                .required(false)
+                .help("Select an Aranet4 device with <device_pattern> in its name"),
         )
         .subcommand(Command::new("device_info").about("Print device information"))
+        .subcommand(Command::new("readout").about("Print the current sensor readings to stdout"))
+        .subcommand(Command::new("archive_history_csv").about("Save the full history to CSV"))
         .subcommand(
-            Command::new("readout").about("Read out the current state and print it to stdout"),
-        )
-        .subcommand(Command::new("archive_history_csv").about("Read out the full history to CSV"))
-        .subcommand(
-            Command::new("archive_history_parquet").about("Read out the full history to Parquet"),
+            Command::new("archive_history_parquet").about("Save the full history to Parquet"),
         )
 }
 
@@ -103,7 +102,7 @@ async fn main() -> Result<(), Error> {
     if peripherals.is_empty() {
         return Err(eyre!("No devices found in the timeout period"));
     }
-    let device_pattern = matches.get_one::<String>("device").unwrap();
+    let device_pattern = matches.get_one::<String>("device_pattern").unwrap();
     let Some(sensor) = find_peripheral(&peripherals, &device_pattern).await else {
         return Err(eyre!(
             "No devices matched device selection '{}'",
