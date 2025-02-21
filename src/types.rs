@@ -58,7 +58,7 @@ impl Metadata for PressureData {
     const DISPLAY_MULTIPLIER: f32 = 0.1;
     const DISPLAY_PRECISION: usize = 1;
     fn label(&self) -> &'static str {
-        "Pressure (mbar)"
+        "Pressure (hPa)"
     }
 }
 
@@ -183,7 +183,7 @@ impl fmt::Display for CurrentSensorMeasurement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CO₂: {:.*} ppm\nT: {:.*}°C\nP: {:.*} mbar\nHumidity: {:.*}%\nBattery: {}%\nStatus: {}\nInterval: {} s\nAgo: {} s\n",
+            "CO₂: {:.*} ppm\nT: {:.*}°C\nP: {:.*} hPa\nHumidity: {:.*}%\nBattery: {}%\nStatus: {}\nInterval: {} s\nAgo: {} s\n",
             CO2Data::DISPLAY_PRECISION,
             (self.co2 as f32) * CO2Data::DISPLAY_MULTIPLIER,
             TemperatureData::DISPLAY_PRECISION,
