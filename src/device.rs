@@ -8,7 +8,6 @@ use color_eyre::{eyre::eyre, Result};
 use std::mem::size_of;
 use std::time::{Duration, Instant};
 use tokio_stream::StreamExt;
-use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
 use crate::types::*;
@@ -35,13 +34,13 @@ const GENERIC_GATT_FIRMWARE_REVISION_STRING_UUID: Uuid =
 
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    device_name: String,
-    model_number: String,
-    serial_number: String,
-    hardware_revision: String,
-    software_revision: String,
-    manufacturer_name: String,
-    firmware_revision: String,
+    pub device_name: String,
+    pub model_number: String,
+    pub serial_number: String,
+    pub hardware_revision: String,
+    pub software_revision: String,
+    pub manufacturer_name: String,
+    pub firmware_revision: String,
 }
 async fn get_string(sensor: &Peripheral, uuid: Uuid) -> Result<String> {
     let char = get_characteristic(sensor, uuid)?;
@@ -80,29 +79,6 @@ impl DeviceInfo {
             firmware_revision,
         })
     }
-}
-
-pub fn print_device_info(info: &DeviceInfo) {
-    println!(
-        "{}\n{}\nModel number: {}\nSerial number: {}\nHardware revision: {}\nSoftware revision: {}\nManufacturer name: {}\nFirmware revision: {}",
-        info.device_name,
-        "=".repeat(info.device_name.graphemes(true).count()),
-        info.model_number,
-        info.serial_number,
-        info.hardware_revision,
-        info.software_revision,
-        info.manufacturer_name,
-        info.firmware_revision
-    );
-}
-
-pub fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorMeasurement) {
-    println!(
-        "{}\n{}\n{}",
-        sensor_name,
-        "=".repeat(sensor_name.graphemes(true).count()),
-        measurement
-    );
 }
 
 fn bytes_to_single_u16(bytes: &[u8]) -> Result<u16, Aranet4Error> {

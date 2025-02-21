@@ -5,6 +5,7 @@ use btleplug::platform::{Manager, Peripheral};
 use chrono::Local;
 use clap::{Arg, Command};
 use color_eyre::eyre::{eyre, Error, Result};
+use unicode_segmentation::UnicodeSegmentation;
 
 mod csv_io;
 mod device;
@@ -12,10 +13,10 @@ mod parquet_io;
 mod types;
 use crate::csv_io::save_history_csv;
 use crate::device::{
-    get_current_sensor_data, get_history, get_local_name, print_current_sensor_data,
-    print_device_info, scan_for_sensor, DeviceInfo,
+    get_current_sensor_data, get_history, get_local_name, scan_for_sensor, DeviceInfo,
 };
 use crate::parquet_io::save_history_parquet;
+use crate::types::CurrentSensorMeasurement;
 
 fn cli() -> Command {
     Command::new("arachiver")
@@ -36,6 +37,29 @@ fn cli() -> Command {
         .subcommand(
             Command::new("archive_history_parquet").about("Save the full history to Parquet"),
         )
+}
+
+fn print_device_info(info: &DeviceInfo) {
+    println!(
+        "{}\n{}\nModel number: {}\nSerial number: {}\nHardware revision: {}\nSoftware revision: {}\nManufacturer name: {}\nFirmware revision: {}",
+        info.device_name,
+        "=".repeat(info.device_name.graphemes(true).count()),
+        info.model_number,
+        info.serial_number,
+        info.hardware_revision,
+        info.software_revision,
+        info.manufacturer_name,
+        info.firmware_revision
+    );
+}
+
+fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorMeasurement) {
+    println!(
+        "{}\n{}\n{}",
+        sensor_name,
+        "=".repeat(sensor_name.graphemes(true).count()),
+        measurement
+    );
 }
 
 async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
