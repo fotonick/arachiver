@@ -1,11 +1,9 @@
 use std::fs::File;
-use std::time::Duration;
 
-use btleplug::api::{Central, Manager as _, ScanFilter};
+use btleplug::api::{Central, Manager as _};
 use btleplug::platform::{Manager, Peripheral};
 use chrono::Local;
 use clap::{Arg, Command};
-
 use color_eyre::eyre::{eyre, Error, Result};
 
 mod csv_io;
@@ -14,8 +12,8 @@ mod parquet_io;
 mod types;
 use crate::csv_io::save_history_csv;
 use crate::device::{
-    find_peripheral, get_current_sensor_data, get_history, get_local_name,
-    print_current_sensor_data, print_device_info, DeviceInfo, ARANET4_SERVICE_UUID,
+    get_current_sensor_data, get_history, get_local_name, print_current_sensor_data,
+    print_device_info, scan_for_sensor, DeviceInfo,
 };
 use crate::parquet_io::save_history_parquet;
 
@@ -40,8 +38,8 @@ fn cli() -> Command {
         )
 }
 
-pub async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
-    let local_name = get_local_name(&peripheral).await.unwrap(); // must be Ok to be found
+async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
+    let local_name = get_local_name(&peripheral).await.unwrap();
     let now = Local::now();
     let output_filename = format!(
         "{}_{}_history.csv",
@@ -57,8 +55,8 @@ pub async fn archive_history_csv(peripheral: &Peripheral) -> Result<String> {
     Ok(output_filename)
 }
 
-pub async fn archive_history_parquet(peripheral: &Peripheral) -> Result<String> {
-    let local_name = get_local_name(&peripheral).await.unwrap(); // must be Ok to be found
+async fn archive_history_parquet(peripheral: &Peripheral) -> Result<String> {
+    let local_name = get_local_name(&peripheral).await.unwrap();
     let now = Local::now();
     let output_filename = format!(
         "{}_{}_history.parquet",
@@ -80,35 +78,19 @@ async fn main() -> Result<(), Error> {
 
     let matches = cli().get_matches();
 
-    // get the first bluetooth adapter
+    // use the first bluetooth adapter
     let central = {
         let manager = Manager::new().await.unwrap();
         let adapters = manager.adapters().await?;
         adapters.into_iter().next().unwrap()
     };
-
-    // start scanning for devices
-    central
-        .start_scan(ScanFilter {
-            services: vec![ARANET4_SERVICE_UUID],
-        })
-        .await?;
-
-    // Only look for devices for 3 seconds.
-    // NB: Instead of waiting with a hard timeout, you can use central.events() to get a stream which will
-    // notify you of new devices, for an example of that see examples/event_driven_discovery.rs
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    let peripherals = central.peripherals().await.unwrap();
-    if peripherals.is_empty() {
-        return Err(eyre!("No devices found in the timeout period"));
-    }
-    let device_pattern = matches.get_one::<String>("device_pattern").unwrap();
-    let Some(sensor) = find_peripheral(&peripherals, &device_pattern).await else {
-        return Err(eyre!(
-            "No devices matched device selection '{}'",
-            &device_pattern
-        ));
-    };
+    let sensor = scan_for_sensor(
+        &central,
+        matches
+            .get_one::<String>("device_pattern")
+            .unwrap_or(&"Aranet".to_string()),
+    )
+    .await?;
 
     match matches.subcommand() {
         Some(("device_info", _sub_matches)) => {

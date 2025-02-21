@@ -1,12 +1,13 @@
-use btleplug::{
-    api::{bleuuid::uuid_from_u16, CharPropFlags, Characteristic, Peripheral as _, WriteType},
-    platform::Peripheral,
+use btleplug::api::{
+    bleuuid::uuid_from_u16, Central as _, CentralEvent, CharPropFlags, Characteristic,
+    Peripheral as _, ScanFilter, WriteType,
 };
+use btleplug::platform::{Adapter, Peripheral};
 use chrono::{DateTime, TimeDelta, Utc};
 use color_eyre::{eyre::eyre, Result};
-use futures::{stream, StreamExt};
 use std::mem::size_of;
-use std::pin::pin;
+use std::time::{Duration, Instant};
+use tokio_stream::StreamExt;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::{uuid, Uuid};
 
@@ -314,22 +315,36 @@ pub async fn get_local_name(peripheral: &Peripheral) -> Option<String> {
         .local_name
 }
 
-pub async fn find_peripheral(peripherals: &[Peripheral], name: &str) -> Option<Peripheral> {
-    pin!(stream::iter(peripherals).filter_map(|p| {
-        async move {
-            if let Some(local_name) = get_local_name(&p).await {
-                if local_name.contains(name) {
-                    Some(p.clone())
-                } else {
-                    None
+pub async fn scan_for_sensor(central: &Adapter, device_pattern: &str) -> Result<Peripheral> {
+    // Set global timeout as our main timeout mechanism, but also per-element
+    // timeout since global timeout may not be evaluated if the Bluetooth
+    // environment is very quiet and no events are generated.
+    const TIMEOUT: Duration = Duration::from_secs(5);
+    let start = Instant::now();
+    let mut events = Box::pin(central.events().await?.timeout(TIMEOUT));
+    central
+        .start_scan(ScanFilter {
+            services: vec![ARANET4_SERVICE_UUID],
+        })
+        .await
+        .unwrap();
+    while let Ok(Some(event)) = events.try_next().await {
+        match event {
+            CentralEvent::DeviceDiscovered(id) => {
+                let peripheral = central.peripheral(&id).await?;
+                if let Some(local_name) = get_local_name(&peripheral).await {
+                    if local_name.contains(device_pattern) {
+                        return Ok(peripheral);
+                    }
                 }
-            } else {
-                None
             }
+            _ => {}
         }
-    }))
-    .next()
-    .await
+        if Instant::now().duration_since(start) > TIMEOUT {
+            break;
+        }
+    }
+    Err(eyre!("No device found before timeout"))
 }
 
 pub async fn get_history(

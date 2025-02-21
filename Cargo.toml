@@ -18,3 +18,4 @@ futures-util = "0.3.30"
 tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros"] }
 unicode-segmentation = "1.11.0"
 uuid = "1.8.0"
+tokio-stream = "0.1.17"
