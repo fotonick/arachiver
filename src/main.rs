@@ -15,7 +15,7 @@ mod types;
 use crate::csv_io::save_history_csv;
 use crate::device::{
     find_peripheral, get_current_sensor_data, get_history, get_local_name,
-    print_current_sensor_data, ARANET4_SERVICE_UUID,
+    print_current_sensor_data, print_device_info, DeviceInfo, ARANET4_SERVICE_UUID,
 };
 use crate::parquet_io::save_history_parquet;
 
@@ -31,6 +31,7 @@ fn cli() -> Command {
                 .default_value("Aranet")
                 .required(false),
         )
+        .subcommand(Command::new("device_info").about("Print device information"))
         .subcommand(
             Command::new("readout").about("Read out the current state and print it to stdout"),
         )
@@ -111,6 +112,10 @@ async fn main() -> Result<(), Error> {
     };
 
     match matches.subcommand() {
+        Some(("device_info", _sub_matches)) => {
+            let info = DeviceInfo::new(&sensor).await?;
+            print_device_info(&info);
+        }
         Some(("readout", _sub_matches)) => {
             let (sensor_name, data) = get_current_sensor_data(&sensor).await?;
             print_current_sensor_data(&sensor_name, &data);

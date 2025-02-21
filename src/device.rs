@@ -20,6 +20,81 @@ const ARANET4_TOTAL_READINGS_UUID: Uuid = uuid!("f0cd2001-95da-4f4b-9ac8-aa55d31
 const ARANET4_TIME_SINCE_UPDATE_UUID: Uuid = uuid!("f0cd2004-95da-4f4b-9ac8-aa55d312af0c");
 const ARANET4_UPDATE_INTERVAL_UUID: Uuid = uuid!("f0cd2002-95da-4f4b-9ac8-aa55d312af0c");
 
+const GENERIC_GATT_DEVICE_MODEL_NUMBER_STRING_UUID: Uuid =
+    uuid!("00002a24-0000-1000-8000-00805f9b34fb");
+const GENERIC_GATT_SERIAL_NUMBER_STRING_UUID: Uuid = uuid!("00002a25-0000-1000-8000-00805f9b34fb");
+const GENERIC_GATT_HARDWARE_REVISION_STRING_UUID: Uuid =
+    uuid!("00002a27-0000-1000-8000-00805f9b34fb");
+const GENERIC_GATT_SOFTWARE_REVISION_STRING_UUID: Uuid =
+    uuid!("00002a28-0000-1000-8000-00805f9b34fb");
+const GENERIC_GATT_MANUFACTURER_NAME_STRING_UUID: Uuid =
+    uuid!("00002a29-0000-1000-8000-00805f9b34fb");
+const GENERIC_GATT_FIRMWARE_REVISION_STRING_UUID: Uuid =
+    uuid!("00002a26-0000-1000-8000-00805f9b34fb");
+
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    device_name: String,
+    model_number: String,
+    serial_number: String,
+    hardware_revision: String,
+    software_revision: String,
+    manufacturer_name: String,
+    firmware_revision: String,
+}
+async fn get_string(sensor: &Peripheral, uuid: Uuid) -> Result<String> {
+    let char = get_characteristic(sensor, uuid)?;
+    let bytes = sensor.read(&char).await?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+impl DeviceInfo {
+    pub async fn new(sensor: &Peripheral) -> Result<Self> {
+        // connect to the device
+        sensor.connect().await?;
+
+        // discover services and characteristics
+        sensor.discover_services().await?;
+
+        let device_name = get_local_name(sensor)
+            .await
+            .unwrap_or("<Missing device name>".to_string());
+        let model_number = get_string(sensor, GENERIC_GATT_DEVICE_MODEL_NUMBER_STRING_UUID).await?;
+        let serial_number = get_string(sensor, GENERIC_GATT_SERIAL_NUMBER_STRING_UUID).await?;
+        let hardware_revision =
+            get_string(sensor, GENERIC_GATT_HARDWARE_REVISION_STRING_UUID).await?;
+        let software_revision =
+            get_string(sensor, GENERIC_GATT_SOFTWARE_REVISION_STRING_UUID).await?;
+        let manufacturer_name =
+            get_string(sensor, GENERIC_GATT_MANUFACTURER_NAME_STRING_UUID).await?;
+        let firmware_revision =
+            get_string(sensor, GENERIC_GATT_FIRMWARE_REVISION_STRING_UUID).await?;
+        Ok(DeviceInfo {
+            device_name,
+            model_number,
+            serial_number,
+            hardware_revision,
+            software_revision,
+            manufacturer_name,
+            firmware_revision,
+        })
+    }
+}
+
+pub fn print_device_info(info: &DeviceInfo) {
+    println!(
+        "{}\n{}\nModel number: {}\nSerial number: {}\nHardware revision: {}\nSoftware revision: {}\nManufacturer name: {}\nFirmware revision: {}",
+        info.device_name,
+        "=".repeat(info.device_name.graphemes(true).count()),
+        info.model_number,
+        info.serial_number,
+        info.hardware_revision,
+        info.software_revision,
+        info.manufacturer_name,
+        info.firmware_revision
+    );
+}
+
 pub fn print_current_sensor_data(sensor_name: &str, measurement: &CurrentSensorMeasurement) {
     println!(
         "{}\n{}\n{}",
