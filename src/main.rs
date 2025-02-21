@@ -4,7 +4,7 @@ use std::time::Duration;
 use btleplug::api::{Central, Manager as _, ScanFilter};
 use btleplug::platform::{Manager, Peripheral};
 use chrono::Local;
-use clap::Command;
+use clap::{Arg, Command};
 
 use color_eyre::eyre::{eyre, Error, Result};
 
@@ -22,6 +22,13 @@ fn cli() -> Command {
         .about("Aranet4 archiver")
         .subcommand_required(true)
         .arg_required_else_help(true)
+        .arg(
+            Arg::new("device")
+                .short('d')
+                .long("select-device")
+                .default_value("Aranet")
+                .required(false),
+        )
         .subcommand(
             Command::new("readout").about("Read out the current state and print it to stdout"),
         )
@@ -73,8 +80,12 @@ async fn main() -> Result<(), Error> {
     if peripherals.is_empty() {
         return Err(eyre!("No devices found in the timeout period"));
     }
-    let Some(sensor) = find_peripheral(&peripherals, "Aranet4").await else {
-        return Err(eyre!("No devices matched selection 'Aranet4'"));
+    let device_pattern = matches.get_one::<String>("device").unwrap();
+    let Some(sensor) = find_peripheral(&peripherals, &device_pattern).await else {
+        return Err(eyre!(
+            "No devices matched device selection '{}'",
+            &device_pattern
+        ));
     };
 
     match matches.subcommand() {
