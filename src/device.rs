@@ -49,7 +49,7 @@ async fn get_string(sensor: &Peripheral, uuid: Uuid) -> Result<String> {
 }
 
 impl DeviceInfo {
-    pub async fn new(sensor: &Peripheral) -> Result<Self> {
+    pub async fn read_from_sensor(sensor: &Peripheral) -> Result<Self> {
         // connect to the device
         sensor.connect().await?;
 

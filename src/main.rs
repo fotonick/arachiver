@@ -118,7 +118,7 @@ async fn main() -> Result<(), Error> {
 
     match matches.subcommand() {
         Some(("device_info", _sub_matches)) => {
-            let info = DeviceInfo::new(&sensor).await?;
+            let info = DeviceInfo::read_from_sensor(&sensor).await?;
             print_device_info(&info);
         }
         Some(("readout", _sub_matches)) => {
