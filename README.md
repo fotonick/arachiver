@@ -1,7 +1,7 @@
 arachiver
 =========
 
-Arachiver is a tool for archiving data from Aranet4 CO2 sensors. Aranet4 devices retain approximately 17.5 days of data with the default measurement interval. At each measurement time, it records CO₂ abundance (ppm), temperature (°C), relative humidity (%), and pressure (hPa).
+Arachiver is a cross-platform tool for archiving data from Aranet4 CO2 sensors. Aranet4 devices retain approximately 17.5 days of data with the default measurement interval. At each measurement time, it records CO₂ abundance (ppm), temperature (°C), relative humidity (%), and pressure (hPa).
 The Arachiver tool is oriented toward data analysis. It can output to CSV or Apache Parquet formats. While temperature and pressure are stored on-device as integers that require applying scale factors that you Just Have To Know, Arachiver applies the appropriate scale factors and stores temperature and pressure as floating-point numbers. Timestamps are UNIX timestamps.
 
 Installation
@@ -9,6 +9,8 @@ Installation
 
 1. Install a Rust toolchain, either through your system package manager or via the [officially recommended rustup tool](https://www.rust-lang.org/tools/install): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 1. `cargo install --git https://github.com/fotonick/arachiver`
+
+The underlying Bluetooth library is [btleplug](https://github.com/deviceplug/btleplug), which claims to support Windows, Linux, macOS, Android, and iOS, though I have only tested macOS.
 
 Usage
 -----
@@ -139,6 +141,8 @@ Related tools
 
 * https://github.com/Anrijs/Aranet4-ESP32
 * https://github.com/Anrijs/Aranet4-Python
+
+Comparatively, Arachiver was designed with enabling data analysis as its primary focus and is not concerned with exposing every control knob.
 
 License
 -------
