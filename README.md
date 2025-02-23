@@ -31,7 +31,8 @@ Commands:
 Options:
   -d, --device <device_pattern>  Select an Aranet4 device with <device_pattern> in its name; by default, the first device with 'Aranet' in its name will be used [default: Aranet]
   -h, --help                     Print help
-
+```
+```
 > arachiver device_info
 Aranet4 1BA27
 =============
@@ -41,7 +42,8 @@ Hardware revision: 12
 Software revision: v0.4.14
 Manufacturer name: SAF Tehnika
 Firmware revision: v1.4.14
-
+```
+```
 > arachiver readout
 Aranet4 1BA27
 =============
@@ -53,18 +55,18 @@ Battery: 22%
 Status: 1
 Interval: 300 s
 Ago: 255 s
-
+```
+```
 > arachiver archive_history_csv
 Wrote 2025-02-21T02:16:51.917392-08:00_Aranet4_1BA27_history.csv
-
 > head -n 3 2025-02-21T02:16:51.917392-08:00_Aranet4_1BA27_history.csv
 timestamp,Temperature (°C),Humidity (%),Pressure (hPa),CO₂ (ppm)
 1738621029,14.90,29,999.8,592
 1738621329,14.95,29,999.7,590
-
+```
+```
 > arachiver archive_history_parquet
 Wrote 2025-02-21T02:18:10.840587-08:00_Aranet4_1BA27_history.parquet
-
 > parquet-tools inspect 2025-02-21T02:18:10.840587-08:00_Aranet4_1BA27_history.parquet
 
 ############ file meta data ############
