@@ -1,7 +1,7 @@
 arachiver
 =========
 
-Arachiver is a cross-platform tool for archiving data from Aranet4 CO2 sensors. Aranet4 devices retain approximately 17.5 days of data with the default measurement interval. At each measurement time, it records CO₂ abundance (ppm), temperature (°C), relative humidity (%), and pressure (hPa).
+Arachiver is a cross-platform tool for archiving data from Aranet4 CO2 sensors over Bluetooth LE. Aranet4 devices retain approximately 17.5 days of data with the default measurement interval. At each measurement time, it records CO₂ abundance (ppm), temperature (°C), relative humidity (%), and pressure (hPa).
 The Arachiver tool is oriented toward data analysis. It can output to CSV or Apache Parquet formats. While temperature and pressure are stored on-device as integers that require applying scale factors that you Just Have To Know, Arachiver applies the appropriate scale factors and stores temperature and pressure as floating-point numbers. Timestamps are UNIX timestamps.
 
 Installation
